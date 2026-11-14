@@ -12,23 +12,19 @@
     <meta name="x5-fullscreen" content="true" />
     <meta name="360-fullscreen" content="true" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Twin Shadows</title>
   </head>
   <body>
-    <canvas id="bg"></canvas>
-    <div class="overlay">
-      <h1 class="title" id="title"></h1>
-      <p class="description">Edit <span class="code">src/client/splash.ts</span> to get started.</p>
-      <div class="counter-row">
-        <!-- Counter buttons removed. Value updated programmatically. -->
-        <span class="counter-value" id="counter-value">0</span>
-      </div>
-      <footer class="footer">
-        <div class="docs-link" tabindex="0" id="docs-link">Docs</div>
-        <span class="divider">|</span>
-        <div class="docs-link" tabindex="0" id="playtest-link">r/Devvit</div>
-        <span class="divider">|</span>
-        <div class="docs-link" tabindex="0" id="discord-link">Discord</div>
-      </footer>
+    <div class="stage">
+      <canvas id="board"></canvas>
+    </div>
+    <!-- TEMPORARY debug bar: remove in step 3 -->
+    <div class="debug-bar">
+      <button id="debug-rotate-left" type="button">Rotate left</button>
+      <button id="debug-rotate-right" type="button">Rotate right</button>
+      <button id="debug-empty" type="button">Empty</button>
+      <button id="debug-solution" type="button">Solution</button>
+      <button id="debug-broken" type="button">Broken</button>
     </div>
     <script type="module" src="game.ts" defer></script>
   </body>
