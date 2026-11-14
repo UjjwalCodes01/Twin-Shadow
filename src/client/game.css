@@ -193,12 +193,52 @@ body:not([data-state='ready']) .controls {
   color: var(--floating);
 }
 
-.win-banner {
-  padding: 4px 10px;
+.stars {
+  font-size: 1.1rem;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  color: var(--floating);
+}
+
+.submit {
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: none;
   border-radius: 8px;
   background: var(--ink);
   color: var(--surface);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.submit:disabled {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-weight: 600;
+  cursor: default;
+}
+
+.submit-note {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
+.submit-note.failed {
+  color: var(--extra);
+  font-weight: 600;
+}
+
+.result {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.85rem;
   font-weight: 700;
   text-wrap: balance;
 }
@@ -324,11 +364,12 @@ body:not([data-state='ready']) .controls {
 
   .status {
     flex: none;
-    max-width: 104px;
+    max-width: 124px;
     padding-top: 0;
   }
 
-  .win-banner {
+  .result,
+  .submit {
     font-size: 0.8rem;
   }
 

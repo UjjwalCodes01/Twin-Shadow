@@ -53,7 +53,6 @@ const bigSetup = (): DebugSetup => {
       front: formatSilhouette(projectFront(placed, BIG_SIZE)),
       side: formatSilhouette(projectSide(placed, BIG_SIZE)),
       par: blocks.length,
-      parIsOptimal: false,
     },
     blocks,
   };

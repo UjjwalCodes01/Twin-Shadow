@@ -10,6 +10,7 @@ import {
   hasFlatColumns,
   isSolidRectangle,
   lowerBound,
+  peakRow,
 } from './analysis';
 
 const grid = (...rows: string[]) => parseSilhouette(rows);
@@ -68,6 +69,12 @@ describe('shape checks', () => {
     expect(columnSpan(grid('....', '.##.'))).toBe(2);
     expect(columnSpan(grid('#..#', '#..#'))).toBe(4);
     expect(columnSpan(grid('....', '....'))).toBe(0);
+  });
+
+  it('finds the highest lit row, counting the floor as row 1', () => {
+    expect(peakRow(grid('....', '....', '#...', '####'))).toBe(2);
+    expect(peakRow(grid('.#..', '....', '....', '####'))).toBe(4);
+    expect(peakRow(grid('....', '....'))).toBe(0);
   });
 
   it('spots a solid rectangle at any size and position', () => {

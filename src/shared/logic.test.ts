@@ -33,7 +33,6 @@ describe('isSolved', () => {
       front: ['.#', '#.'],
       side: ['#', '#'],
       par: 2,
-      parIsOptimal: false,
     };
     const blocks = new Set(['0,0,0', '1,1,0']);
     expect(findFloating(blocks)).toEqual(['1,1,0']);

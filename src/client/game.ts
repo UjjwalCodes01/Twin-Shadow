@@ -1,15 +1,30 @@
-import { parseDebugPuzzleResponse, parsePuzzleResponse } from '../shared/api';
+import {
+  parseDebugPuzzleResponse,
+  parsePuzzleResponse,
+  parseSubmitResponse,
+  type Submission,
+} from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { DEBUG_STATES, debugSetup } from './debug';
-import { createHud } from './hud';
+import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
 
-const PUZZLE_URL = '/api/puzzle/today';
+const PUZZLE_URL = '/api/puzzle';
+const SUBMIT_URL = '/api/submit';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type Game = { store: Store; scene: SceneHandle; stop: () => void };
+
+type GameOptions = {
+  blocks?: readonly string[];
+  rotation?: number;
+  /** The player's stored result for this puzzle, if any. */
+  submission?: Submission | null;
+  /** Why Submit is off for this game, or null when it is allowed. */
+  submitBlocked?: string | null;
+};
 
 const element = (id: string): HTMLElement => {
   const found = document.getElementById(id);
@@ -28,22 +43,49 @@ const setLoadState = (state: LoadState): void => {
   notice.hidden = state === 'ready';
   retryButton.hidden = state !== 'error';
   noticeText.textContent =
-    state === 'error' ? "Couldn't load today's puzzle." : 'Loading puzzle…';
+    state === 'error' ? "Couldn't load this puzzle." : 'Loading puzzle\u2026';
+};
+
+/**
+ * Sends a sculpture to the server, which decides whether it counts. A network
+ * failure or an unreadable reply becomes a short message the player can retry.
+ */
+const submitSculpture = async (blocks: string[]): Promise<SubmitOutcome> => {
+  try {
+    const response = await fetch(SUBMIT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blocks }),
+    });
+    const body: unknown = await response.json();
+    const parsed = parseSubmitResponse(body);
+    if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status === 'rejected') return { ok: false, message: parsed.message };
+    // 'already-submitted' carries the first result, which is the one that counts.
+    return { ok: true, submission: parsed.submission };
+  } catch (error) {
+    console.error(`Could not submit to ${SUBMIT_URL}:`, error);
+    return { ok: false, message: "Couldn't submit. Try again." };
+  }
 };
 
 let game: Game | null = null;
 
 /** Starts a game on a fresh canvas, replacing any game already running. */
-const startGame = (puzzle: Puzzle, blocks: readonly string[] = [], rotation = 0): void => {
+const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   game?.stop();
   const canvas = document.createElement('canvas');
   canvas.id = 'board';
   stage.append(canvas);
 
-  const store = createStore(puzzle.size, blocks);
-  if (rotation !== 0) store.rotate(rotation);
+  const store = createStore(puzzle.size, options.blocks ?? []);
+  if (options.rotation) store.rotate(options.rotation);
   const scene = createScene(canvas, puzzle, store);
-  const removeHud = createHud(puzzle, store);
+  const removeHud = createHud(puzzle, store, {
+    submission: options.submission ?? null,
+    submitBlocked: options.submitBlocked ?? null,
+    submit: submitSculpture,
+  });
   attachInput(canvas, puzzle, store, scene);
 
   game = {
@@ -63,9 +105,12 @@ const startGame = (puzzle: Puzzle, blocks: readonly string[] = [], rotation = 0)
 // local build is opened with ?debug=1&state=empty|solution|broken|big&rot=0..3.
 // To remove: delete this block, debug.ts, #debug-bar in game.html and
 // game.css, and the `debug` field of PuzzleResponse with its server check.
+// A debug puzzle is not the post's puzzle, so it can never be submitted.
+const DEBUG_SUBMIT_BLOCKED = 'Debug puzzle: submit is off';
+
 const loadDebugState = (state: string | null, rotation = 0): void => {
   const setup = debugSetup(state);
-  startGame(setup.puzzle, setup.blocks, rotation);
+  startGame(setup.puzzle, { blocks: setup.blocks, rotation, submitBlocked: DEBUG_SUBMIT_BLOCKED });
 };
 
 // Steps through the generated queue with the dev-only endpoint.
@@ -79,8 +124,8 @@ const loadQueuePuzzle = async (number: number, label: HTMLElement): Promise<void
     if (!parsed) throw new Error('Response is not a valid puzzle');
     const { puzzle, count } = parsed;
     queueNumber = puzzle.number;
-    startGame(puzzle);
-    label.textContent = `#${puzzle.number}/${count} tier ${puzzle.tier} par ${puzzle.par}${puzzle.parIsOptimal ? '' : '?'}`;
+    startGame(puzzle, { submitBlocked: DEBUG_SUBMIT_BLOCKED });
+    label.textContent = `#${puzzle.number}/${count} tier ${puzzle.tier} par ${puzzle.par}`;
   } catch (error) {
     console.error(`Could not load puzzle ${number}:`, error);
     label.textContent = `#${number} unavailable`;
@@ -98,6 +143,8 @@ const showDebugBar = (): void => {
     debugButton.addEventListener('click', action);
     parent.append(debugButton);
   };
+  // "post" goes back to the puzzle this post really holds.
+  addButton(bar, 'post', () => void loadPostPuzzle());
   for (const state of DEBUG_STATES) addButton(bar, state, () => loadDebugState(state));
 
   // Second row: step through the generated queue.
@@ -121,11 +168,11 @@ const showDebugBar = (): void => {
 // --- end of temporary debug states -----------------------------------------
 
 /**
- * Loads today's puzzle from the server. A failed request or a malformed
- * response shows an error with Retry; there is no bundled fallback, so a
- * broken round trip is always visible.
+ * Loads the puzzle for the post this page runs in. A failed request or a
+ * malformed response shows an error with Retry; there is no bundled fallback,
+ * so a broken round trip is always visible.
  */
-const loadTodaysPuzzle = async (): Promise<void> => {
+async function loadPostPuzzle(): Promise<void> {
   setLoadState('loading');
   try {
     const response = await fetch(PUZZLE_URL);
@@ -133,15 +180,23 @@ const loadTodaysPuzzle = async (): Promise<void> => {
     const body: unknown = await response.json();
     const parsed = parsePuzzleResponse(body);
     if (!parsed) throw new Error('Response is not a valid puzzle');
-    startGame(parsed.puzzle);
-    if (parsed.debug) showDebugBar();
+    const { puzzle, submission, canSubmit, debug } = parsed;
+    startGame(puzzle, {
+      // A returning player gets their submitted sculpture back on the board.
+      blocks: submission?.sculpture ?? [],
+      submission,
+      submitBlocked: canSubmit ? null : 'Log in to submit',
+    });
+    if (debug) showDebugBar();
   } catch (error) {
+    game?.stop();
+    game = null;
     console.error(`Could not load ${PUZZLE_URL}:`, error);
     setLoadState('error');
   }
-};
+}
 
-retryButton.addEventListener('click', () => void loadTodaysPuzzle());
+retryButton.addEventListener('click', () => void loadPostPuzzle());
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('debug') === '1') {
@@ -150,5 +205,5 @@ if (params.get('debug') === '1') {
   const rotation = Number(params.get('rot') ?? 0);
   loadDebugState(params.get('state'), Number.isInteger(rotation) ? rotation : 0);
 } else {
-  void loadTodaysPuzzle();
+  void loadPostPuzzle();
 }

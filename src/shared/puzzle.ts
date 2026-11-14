@@ -15,6 +15,13 @@ export type Puzzle = {
   side: string[];
   /** Fewest blocks the generator found that solve the puzzle. */
   par: number;
+};
+
+/**
+ * A puzzle as stored in the generated queue. `parIsOptimal` is a note for the
+ * developer and is never sent to players: only `Puzzle` fields leave the server.
+ */
+export type QueuedPuzzle = Puzzle & {
   /** True when par is proven to be the minimum, not only the best found. */
   parIsOptimal: boolean;
 };
@@ -27,7 +34,6 @@ export const TEST_PUZZLE: Puzzle = {
   front: ['...', '###', '#.#'],
   side: ['...', '#..', '###'],
   par: 6,
-  parIsOptimal: true,
 };
 
 export const TEST_SOLUTION = ['0,0,0', '0,0,1', '2,0,2', '0,1,0', '1,1,0', '2,1,0'];

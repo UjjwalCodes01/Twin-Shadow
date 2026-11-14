@@ -44,6 +44,9 @@ export const columnSpan = (grid: Grid): number => {
   return first === undefined || last === undefined ? 0 : last - first + 1;
 };
 
+/** The highest row holding a lit cell, counting the floor row as 1. 0 when empty. */
+export const peakRow = (grid: Grid): number => grid.map((row) => row.some(Boolean)).lastIndexOf(true) + 1;
+
 /** True when the lit cells exactly fill their bounding box, at any size. */
 export const isSolidRectangle = (grid: Grid): boolean => {
   const litRows = grid.map((row) => row.some(Boolean));

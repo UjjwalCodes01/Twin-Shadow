@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { parsePuzzle } from '../shared/api';
+import { parsePuzzle, parseQueuedPuzzle } from '../shared/api';
 import { findFloating, isSolved } from '../shared/logic';
-import type { Puzzle } from '../shared/puzzle';
-import { canonicalKey, countOverhangs, lowerBound } from './analysis';
+import type { QueuedPuzzle } from '../shared/puzzle';
+import { canonicalKey, countOverhangs, lowerBound, peakRow } from './analysis';
 import { PREVIEW_PATH, PUZZLES_PATH, SOLUTIONS_PATH, puzzlesJson, solutionsJson } from './cli';
 import {
   DEFAULT_OPTIONS,
@@ -38,13 +38,13 @@ const parseSolution = (value: unknown): Solution => {
 };
 
 const rawPuzzles = readArray(PUZZLES_PATH);
-const puzzles: Puzzle[] = rawPuzzles.map((raw, index) => {
-  const puzzle = parsePuzzle(raw);
+const puzzles: QueuedPuzzle[] = rawPuzzles.map((raw, index) => {
+  const puzzle = parseQueuedPuzzle(raw);
   if (!puzzle) throw new Error(`Puzzle at index ${index} fails validation`);
   return puzzle;
 });
 const solutions = readArray(SOLUTIONS_PATH).map(parseSolution);
-const solutionFor = (puzzle: Puzzle): Solution => {
+const solutionFor = (puzzle: QueuedPuzzle): Solution => {
   const solution = solutions[puzzle.number - 1];
   if (!solution || solution.number !== puzzle.number) {
     throw new Error(`No solution stored for puzzle ${puzzle.number}`);
@@ -59,9 +59,14 @@ describe('the committed queue', () => {
     expect(puzzles.map((puzzle) => puzzle.number)).toEqual(puzzles.map((_, index) => index + 1));
   });
 
-  it('passes the validation the client uses, unchanged', () => {
-    // parsePuzzle already ran on every entry above; check it dropped nothing.
+  it('passes the validation the client uses', () => {
     expect(puzzles).toEqual(rawPuzzles);
+    for (const raw of rawPuzzles) {
+      const forPlayers = parsePuzzle(raw);
+      expect(forPlayers).not.toBeNull();
+      // The player-facing copy drops the developer-only note.
+      expect(forPlayers).not.toHaveProperty('parIsOptimal');
+    }
   });
 
   it('follows the weekly tier pattern and each tier`s board size', () => {
@@ -100,7 +105,7 @@ describe('the committed queue', () => {
     }
   });
 
-  it('meets each tier`s block count, overhang and par rules', () => {
+  it('meets each tier`s block count, overhang, height and par rules', () => {
     for (const puzzle of puzzles) {
       const settings = TIER_SETTINGS[puzzle.tier];
       const { front, side } = targetGrids(puzzle);
@@ -111,6 +116,8 @@ describe('the committed queue', () => {
       expect(overhangs).toBeGreaterThanOrEqual(settings.minOverhangs);
       if (settings.maxOverhangs !== null) expect(overhangs).toBeLessThanOrEqual(settings.maxOverhangs);
       expect(puzzle.par).toBeGreaterThanOrEqual(settings.minPar);
+      expect(puzzle.par).toBeLessThanOrEqual(settings.maxPar);
+      expect(Math.max(peakRow(front), peakRow(side))).toBeGreaterThanOrEqual(settings.minPeakRow);
     }
   });
 

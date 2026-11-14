@@ -2,7 +2,7 @@
 
 A daily 3D puzzle that runs as an interactive post on Reddit. Build one sculpture out of blocks so that its two shadows match the two target silhouettes.
 
-This is an early prototype. It plays one fixed puzzle; a queue of generated daily puzzles exists but is not scheduled yet, and scoring and leaderboards are not built.
+This is an early prototype. A new puzzle is posted each day from a generated queue, and each post keeps its own puzzle. You can submit one solution per puzzle and get a star rating. Leaderboards, streaks and the solver gallery are not built yet.
 
 ## How to play
 
@@ -14,6 +14,8 @@ This is an early prototype. It plays one fixed puzzle; a queue of generated dail
 - Use the rotate buttons to turn the board in quarter turns. **Undo** steps back one move and **Reset** clears the board.
 - Every block must connect to the floor through other blocks, face to face. A floating block is tinted and stops the puzzle from counting as solved.
 - The puzzle is solved when both shadows match exactly and nothing floats.
+- Solving is only the start: the goal is to use as few blocks as you can. Par is shown next to your block count. Press **Submit** when you are happy; only your first submission for a puzzle counts.
+- Stars: three at or under par, two within three blocks of par, one for any other solve.
 
 ## Development
 
@@ -38,8 +40,8 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | --- | --- |
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
 | `src/client/` | The three.js board, tap input and the HTML controls |
-| `src/server/` | The Hono server: the puzzle endpoint and post creation |
+| `src/server/` | The Hono server: the puzzle and submit endpoints, post creation and the daily job |
 | `src/generator/` | The offline puzzle generator, run with `npm run generate` |
-| `devvit.json` | App configuration: entry points, menu item and install trigger |
+| `devvit.json` | App configuration: entry points, menu item, install trigger and the scheduled task |
 
 Built with [Devvit Web](https://developers.reddit.com/), [three.js](https://threejs.org/), [Hono](https://hono.dev/), [Vite](https://vite.dev/) and TypeScript.

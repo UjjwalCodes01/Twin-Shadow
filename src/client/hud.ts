@@ -11,8 +11,21 @@ import {
   type CellState,
   type Grid,
 } from '../shared/logic';
+import type { Submission } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
+import { sortBlocks, starsFor, type Stars } from '../shared/score';
 import type { GameState, Store } from './store';
+
+export type SubmitOutcome = { ok: true; submission: Submission } | { ok: false; message: string };
+
+export type HudOptions = {
+  /** The player's stored result for this puzzle, if they already submitted. */
+  submission: Submission | null;
+  /** Why Submit is switched off for this game (logged out, debug puzzle), or null. */
+  submitBlocked: string | null;
+  /** Sends the sculpture to the server. Never throws. */
+  submit: (blocks: string[]) => Promise<SubmitOutcome>;
+};
 
 /** Longest side of a silhouette panel, in CSS px. */
 const PANEL_PX = 84;
@@ -60,6 +73,10 @@ const buildPanel = (id: string, columns: number, rows: number): Panel => {
   return { root, cells };
 };
 
+const starText = (stars: Stars): string => '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars);
+
+const blockText = (count: number): string => `${count} ${count === 1 ? 'block' : 'blocks'}`;
+
 const paintPanel = (panel: Panel, states: CellState[][]): void => {
   panel.cells.forEach((row, y) => {
     row.forEach((cell, column) => {
@@ -71,7 +88,7 @@ const paintPanel = (panel: Panel, states: CellState[][]): void => {
 };
 
 /** Wires the HUD to one game. Returns a function that unwires it again. */
-export const createHud = (puzzle: Puzzle, store: Store): (() => void) => {
+export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): (() => void) => {
   const { size } = puzzle;
   const frontTarget: Grid = parseSilhouette(puzzle.front);
   const sideTarget: Grid = parseSilhouette(puzzle.side);
@@ -80,7 +97,10 @@ export const createHud = (puzzle: Puzzle, store: Store): (() => void) => {
 
   const blockCount = element('block-count');
   const floatingWarning = element('floating-warning');
-  const winBanner = element('win-banner');
+  const starsLine = element('stars');
+  const submitButton = button('submit');
+  const submitNote = element('submit-note');
+  const resultLine = element('result');
   const addButton = button('mode-add');
   const removeButton = button('mode-remove');
   const undoButton = button('undo');
@@ -116,20 +136,67 @@ export const createHud = (puzzle: Puzzle, store: Store): (() => void) => {
     resetTimer = window.setTimeout(disarmReset, RESET_CONFIRM_MS);
   });
 
+  // Submitting. The player chooses when to stop trimming: nothing is sent
+  // until they press Submit, and only the first result counts.
+  let submission = options.submission;
+  let submitting = false;
+  let failure: string | null = null;
+
+  onClick(submitButton, () => {
+    const { blocks } = store.getState();
+    if (submitting || submission || options.submitBlocked || !isSolved(blocks, puzzle)) return;
+    submitting = true;
+    failure = null;
+    render(store.getState());
+    void options.submit(sortBlocks(blocks)).then((outcome) => {
+      submitting = false;
+      if (outcome.ok) submission = outcome.submission;
+      else failure = outcome.message;
+      // The game may have been replaced while the request was in flight.
+      if (!listeners.signal.aborted) render(store.getState());
+    });
+  });
+
+  const renderSubmit = (blocks: ReadonlySet<string>, solved: boolean): void => {
+    // Live rating for the sculpture on the board, until a result is recorded.
+    starsLine.hidden = !solved || submission !== null;
+    if (solved) {
+      const stars = starsFor(blocks.size, puzzle.par);
+      starsLine.textContent = starText(stars);
+      starsLine.setAttribute('aria-label', `${stars} of 3 stars`);
+    }
+
+    submitButton.hidden = submission !== null;
+    submitButton.disabled = !solved || submitting || options.submitBlocked !== null;
+    submitButton.textContent = submitting
+      ? 'Submitting\u2026'
+      : solved
+        ? `Submit ${blockText(blocks.size)}`
+        : 'Submit';
+
+    const note = submission ? null : (options.submitBlocked ?? failure);
+    submitNote.hidden = note === null;
+    submitNote.textContent = note ?? '';
+    submitNote.classList.toggle('failed', options.submitBlocked === null && failure !== null);
+
+    resultLine.hidden = submission === null;
+    if (submission) {
+      resultLine.textContent = `Submitted: ${blockText(submission.blocks)}, par ${submission.par} ${starText(submission.stars)}`;
+    }
+  };
+
   const render = (state: GameState): void => {
     const { blocks, mode, undoStack } = state;
     paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget));
     paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget));
 
-    blockCount.textContent = `${blocks.size} ${blocks.size === 1 ? 'block' : 'blocks'}`;
+    blockCount.textContent = `${blockText(blocks.size)}, par ${puzzle.par}`;
 
     const floating = findFloating(blocks).length;
     floatingWarning.hidden = floating === 0;
     floatingWarning.textContent = `${floating} floating`;
 
-    const solved = isSolved(blocks, puzzle);
-    winBanner.hidden = !solved;
-    winBanner.textContent = `Solved with ${blocks.size} blocks`;
+    renderSubmit(blocks, isSolved(blocks, puzzle));
 
     addButton.setAttribute('aria-pressed', String(mode === 'add'));
     removeButton.setAttribute('aria-pressed', String(mode === 'remove'));

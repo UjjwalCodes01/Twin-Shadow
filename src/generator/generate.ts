@@ -17,8 +17,9 @@ import {
   toKey,
   type Grid,
 } from '../shared/logic';
-import type { Puzzle, Size, Tier } from '../shared/puzzle';
+import type { QueuedPuzzle, Size, Tier } from '../shared/puzzle';
 import { createRandom, type Random } from '../shared/random';
+import { sortBlocks } from '../shared/score';
 import {
   canonicalKey,
   columnSpan,
@@ -27,6 +28,7 @@ import {
   hasFlatColumns,
   isSolidRectangle,
   lowerBound,
+  peakRow,
 } from './analysis';
 
 // --- Settings ----------------------------------------------------------------
@@ -42,8 +44,14 @@ export type TierSettings = {
   minOverhangs: number;
   /** Overhang cells allowed across the two silhouettes, or null for no limit. */
   maxOverhangs: number | null;
-  /** Puzzles with a lower par are too slight for the tier. */
+  /** At least one silhouette must reach this row, counting the floor row as 1. */
+  minPeakRow: number;
+  /**
+   * Par limits, both ends included. Below the range a puzzle is too slight
+   * for the tier; above it there is too much tapping for a daily.
+   */
   minPar: number;
+  maxPar: number;
 };
 
 /** Board sizes and difficulty per tier. Change sizes here. */
@@ -55,7 +63,9 @@ export const TIER_SETTINGS: Record<Tier, TierSettings> = {
     stackOnly: true,
     minOverhangs: 0,
     maxOverhangs: 0,
-    minPar: 5,
+    minPeakRow: 3,
+    minPar: 6,
+    maxPar: 10,
   },
   2: {
     size: { w: 5, d: 5, h: 4 },
@@ -64,7 +74,9 @@ export const TIER_SETTINGS: Record<Tier, TierSettings> = {
     stackOnly: false,
     minOverhangs: 1,
     maxOverhangs: null,
-    minPar: 8,
+    minPeakRow: 3,
+    minPar: 9,
+    maxPar: 14,
   },
   3: {
     size: { w: 5, d: 5, h: 5 },
@@ -73,7 +85,9 @@ export const TIER_SETTINGS: Record<Tier, TierSettings> = {
     stackOnly: false,
     minOverhangs: 3,
     maxOverhangs: null,
-    minPar: 11,
+    minPeakRow: 4,
+    minPar: 12,
+    maxPar: 18,
   },
 };
 
@@ -125,16 +139,18 @@ export const REJECTIONS = [
   'too few lit cells',
   'solid rectangle',
   'narrow span',
+  'too low',
   'flat columns',
   'identical silhouettes',
   'overhang requirement',
   'duplicate',
   'par too low',
+  'par too high',
 ] as const;
 export type Rejection = (typeof REJECTIONS)[number];
 
 export type GeneratedPuzzle = {
-  puzzle: Puzzle;
+  puzzle: QueuedPuzzle;
   lowerBound: number;
   /** The hidden sculpture the silhouettes were taken from. Never sent to players. */
   seed: string[];
@@ -345,13 +361,6 @@ const findPar = (
 
 // --- Building and filtering a candidate ----------------------------------------
 
-const sortKeys = (keys: readonly string[]): string[] =>
-  [...keys].sort((a, b) => {
-    const ca = parseKey(a);
-    const cb = parseKey(b);
-    return ca.y - cb.y || ca.z - cb.z || ca.x - cb.x;
-  });
-
 /** The first cheap check a candidate fails, or null. Par is checked afterwards. */
 const shapeRejection = (
   front: Grid,
@@ -373,6 +382,7 @@ const shapeRejection = (
   ) {
     return 'narrow span';
   }
+  if (Math.max(peakRow(front), peakRow(side)) < settings.minPeakRow) return 'too low';
   if (hasFlatColumns(front) || hasFlatColumns(side)) return 'flat columns';
   if (frontRows.join('/') === sideRows.join('/')) return 'identical silhouettes';
   const overhangs = countOverhangs(front) + countOverhangs(side);
@@ -393,11 +403,13 @@ const emptyReport = (): TierReport => ({
     'too few lit cells': 0,
     'solid rectangle': 0,
     'narrow span': 0,
+    'too low': 0,
     'flat columns': 0,
     'identical silhouettes': 0,
     'overhang requirement': 0,
     'duplicate': 0,
     'par too low': 0,
+    'par too high': 0,
   },
 });
 
@@ -442,8 +454,12 @@ export const generateQueue = (overrides: Partial<GeneratorOptions> = {}): Genera
         tally.rejected['par too low'] += 1;
         continue;
       }
+      if (parSolution.length > settings.maxPar) {
+        tally.rejected['par too high'] += 1;
+        continue;
+      }
 
-      const puzzle: Puzzle = {
+      const puzzle: QueuedPuzzle = {
         id: `ts-${String(number).padStart(4, '0')}`,
         number,
         tier,
@@ -462,8 +478,8 @@ export const generateQueue = (overrides: Partial<GeneratorOptions> = {}): Genera
       accepted = {
         puzzle,
         lowerBound: bound,
-        seed: sortKeys(seed),
-        parSolution: sortKeys(parSolution),
+        seed: sortBlocks(seed),
+        parSolution: sortBlocks(parSolution),
       };
     }
 
@@ -495,7 +511,7 @@ export const previewQueue = (puzzles: readonly GeneratedPuzzle[]): string =>
   puzzles.map(previewPuzzle).join('\n\n') + '\n';
 
 /** Re-derives a puzzle's two target grids, for checks on stored data. */
-export const targetGrids = (puzzle: Puzzle): { front: Grid; side: Grid } => ({
+export const targetGrids = (puzzle: Pick<QueuedPuzzle, 'front' | 'side'>): { front: Grid; side: Grid } => ({
   front: parseSilhouette(puzzle.front),
   side: parseSilhouette(puzzle.side),
 });
