@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Twin Shadows</title>
   </head>
-  <body>
+  <body data-state="loading">
     <header class="readout">
       <section class="panel front" id="panel-front" aria-label="Front shadow">
         <h2 class="panel-label">Front</h2>
@@ -31,8 +31,11 @@
       </section>
     </header>
 
-    <main class="stage">
-      <canvas id="board"></canvas>
+    <main class="stage" id="stage">
+      <div class="notice" id="notice" role="status">
+        <p id="notice-text">Loading puzzle&hellip;</p>
+        <button id="retry" type="button" hidden>Retry</button>
+      </div>
     </main>
 
     <footer class="controls">

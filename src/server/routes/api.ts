@@ -1,93 +1,9 @@
 import { Hono } from 'hono';
-import { context, redis, reddit } from '@devvit/web/server';
-import type {
-  DecrementResponse,
-  IncrementResponse,
-  InitResponse,
-} from '../../shared/api';
+import { context } from '@devvit/web/server';
+import type { PuzzleResponse } from '../../shared/api';
+import { todayResponse } from '../core/puzzle';
 
-type ErrorResponse = {
-  status: 'error';
-  message: string;
-};
-
+// Mounted at /api in index.ts, so every route here starts with /api/.
 export const api = new Hono();
 
-api.get('/init', async (c) => {
-  const { postId } = context;
-
-  if (!postId) {
-    console.error('API Init Error: postId not found in devvit context');
-    return c.json<ErrorResponse>(
-      {
-        status: 'error',
-        message: 'postId is required but missing from context',
-      },
-      400
-    );
-  }
-
-  try {
-    const [count, username] = await Promise.all([
-      redis.get('count'),
-      reddit.getCurrentUsername(),
-    ]);
-
-    return c.json<InitResponse>({
-      type: 'init',
-      postId: postId,
-      count: count ? parseInt(count) : 0,
-      username: username ?? 'anonymous',
-    });
-  } catch (error) {
-    console.error(`API Init Error for post ${postId}:`, error);
-    let errorMessage = 'Unknown error during initialization';
-    if (error instanceof Error) {
-      errorMessage = `Initialization failed: ${error.message}`;
-    }
-    return c.json<ErrorResponse>(
-      { status: 'error', message: errorMessage },
-      400
-    );
-  }
-});
-
-api.post('/increment', async (c) => {
-  const { postId } = context;
-  if (!postId) {
-    return c.json<ErrorResponse>(
-      {
-        status: 'error',
-        message: 'postId is required',
-      },
-      400
-    );
-  }
-
-  const count = await redis.incrBy('count', 1);
-  return c.json<IncrementResponse>({
-    count,
-    postId,
-    type: 'increment',
-  });
-});
-
-api.post('/decrement', async (c) => {
-  const { postId } = context;
-  if (!postId) {
-    return c.json<ErrorResponse>(
-      {
-        status: 'error',
-        message: 'postId is required',
-      },
-      400
-    );
-  }
-
-  const count = await redis.incrBy('count', -1);
-  return c.json<DecrementResponse>({
-    count,
-    postId,
-    type: 'decrement',
-  });
-});
+api.get('/puzzle/today', (c) => c.json<PuzzleResponse>(todayResponse(context.subredditName)));

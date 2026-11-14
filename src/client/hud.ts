@@ -40,6 +40,7 @@ const button = (id: string): HTMLButtonElement => {
 const buildPanel = (id: string, columns: number, rows: number): Panel => {
   const root = element(id);
   const grid = element(`${id}-grid`);
+  grid.replaceChildren();
   const cellPx = Math.floor(
     (PANEL_PX - PANEL_GAP_PX * (Math.max(columns, rows) - 1)) / Math.max(columns, rows)
   );
@@ -69,7 +70,8 @@ const paintPanel = (panel: Panel, states: CellState[][]): void => {
   panel.root.classList.toggle('solved', solved);
 };
 
-export const createHud = (puzzle: Puzzle, store: Store): void => {
+/** Wires the HUD to one game. Returns a function that unwires it again. */
+export const createHud = (puzzle: Puzzle, store: Store): (() => void) => {
   const { size } = puzzle;
   const frontTarget: Grid = parseSilhouette(puzzle.front);
   const sideTarget: Grid = parseSilhouette(puzzle.side);
@@ -84,11 +86,16 @@ export const createHud = (puzzle: Puzzle, store: Store): void => {
   const undoButton = button('undo');
   const resetButton = button('reset');
 
-  addButton.addEventListener('click', () => store.setMode('add'));
-  removeButton.addEventListener('click', () => store.setMode('remove'));
-  button('rotate-left').addEventListener('click', () => store.rotate(1));
-  button('rotate-right').addEventListener('click', () => store.rotate(-1));
-  undoButton.addEventListener('click', () => store.undo());
+  // One signal removes every listener when the game is replaced.
+  const listeners = new AbortController();
+  const onClick = (target: HTMLButtonElement, action: () => void): void =>
+    target.addEventListener('click', action, { signal: listeners.signal });
+
+  onClick(addButton, () => store.setMode('add'));
+  onClick(removeButton, () => store.setMode('remove'));
+  onClick(button('rotate-left'), () => store.rotate(1));
+  onClick(button('rotate-right'), () => store.rotate(-1));
+  onClick(undoButton, () => store.undo());
 
   // Reset needs a second tap within a few seconds.
   let resetTimer = 0;
@@ -98,7 +105,7 @@ export const createHud = (puzzle: Puzzle, store: Store): void => {
     resetButton.textContent = 'Reset';
     resetButton.classList.remove('armed');
   };
-  resetButton.addEventListener('click', () => {
+  onClick(resetButton, () => {
     if (resetTimer !== 0) {
       disarmReset();
       store.reset();
@@ -131,6 +138,12 @@ export const createHud = (puzzle: Puzzle, store: Store): void => {
     if (blocks.size === 0) disarmReset();
   };
 
-  store.subscribe(render);
+  const unsubscribe = store.subscribe(render);
   render(store.getState());
+
+  return () => {
+    unsubscribe();
+    listeners.abort();
+    disarmReset();
+  };
 };

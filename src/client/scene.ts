@@ -419,6 +419,8 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
       for (const timer of flashTimers) window.clearTimeout(timer);
       if (frame !== 0) cancelAnimationFrame(frame);
       renderer.dispose();
+      // Give the WebGL context back now; browsers only allow a handful.
+      renderer.forceContextLoss();
     },
   };
 };
