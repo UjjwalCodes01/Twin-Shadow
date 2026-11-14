@@ -12,9 +12,9 @@
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "login": "devvit login",
     "prettier": "prettier --write .",
-    "test": "vitest run",
+    "test": "vitest run --dir src",
     "test:types": "tsc --build",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run --dir src"
   },
   "engines": {
     "node": ">=24.0.0"
