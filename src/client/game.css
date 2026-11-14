@@ -66,6 +66,10 @@ body {
 /* --- Readout: two silhouette panels and the status between them ------------ */
 .readout {
   grid-area: readout;
+  /* On a wide screen, keep the panels near the board instead of in the corners. */
+  width: 100%;
+  max-width: 560px;
+  justify-self: center;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -169,6 +173,9 @@ body {
 /* --- Controls -------------------------------------------------------------- */
 .controls {
   grid-area: controls;
+  width: 100%;
+  max-width: 560px;
+  justify-self: center;
   display: grid;
   grid-template-columns: 2.5fr repeat(4, 1fr);
   gap: 6px;
@@ -257,6 +264,7 @@ body {
   }
 
   .readout {
+    width: auto;
     flex-direction: column;
     align-items: center;
     justify-content: center;
