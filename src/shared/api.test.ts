@@ -18,10 +18,13 @@ describe('parsePuzzle', () => {
   it('accepts a board that is not a cube', () => {
     const puzzle = {
       id: 'wide',
+      number: 12,
+      tier: 2,
       size: { w: 4, d: 2, h: 3 },
       front: ['....', '.##.', '####'],
       side: ['..', '#.', '##'],
       par: 5,
+      parIsOptimal: false,
     };
     expect(parsePuzzle(puzzle)).toEqual(puzzle);
   });
@@ -59,6 +62,16 @@ describe('parsePuzzle', () => {
     expect(parsePuzzle(puzzleWith({ id: 12 }))).toBeNull();
     expect(parsePuzzle(puzzleWith({ par: -1 }))).toBeNull();
     expect(parsePuzzle(puzzleWith({ par: 'six' }))).toBeNull();
+  });
+
+  it('rejects a bad number, tier or parIsOptimal', () => {
+    expect(parsePuzzle(puzzleWith({ number: -1 }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ number: 1.5 }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ tier: 0 }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ tier: 4 }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ tier: '1' }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ parIsOptimal: 'yes' }))).toBeNull();
+    expect(parsePuzzle(puzzleWith({ parIsOptimal: undefined }))).toBeNull();
   });
 
   it('rejects values that are not objects', () => {

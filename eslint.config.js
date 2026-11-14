@@ -19,6 +19,18 @@ export default defineConfig([
   },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['src/generator/**/*.{ts,tsx,mjs,cjs,js}'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      globals: globals.node,
+      parserOptions: {
+        project: ['./tools/tsconfig.generator.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['src/shared/**/*.{ts,tsx,mjs,cjs,js}'],
     languageOptions: {
       ecmaVersion: 2023,

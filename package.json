@@ -8,6 +8,7 @@
     "build": "vite build",
     "deploy": "npm run test:types && npm run lint && devvit upload",
     "dev": "devvit playtest",
+    "generate": "node tools/generate.mjs",
     "launch": "npm run deploy && devvit publish",
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "login": "devvit login",

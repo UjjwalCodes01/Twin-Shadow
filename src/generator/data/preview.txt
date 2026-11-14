@@ -1,0 +1,443 @@
+#1  Mon  tier 1  4x4x4  par 7  lower bound 7  (optimal)  seed 10 blocks
+front    side
+....     ....
+...#     #...
+.#.#     #.#.
+.###     ####
+
+#2  Tue  tier 1  4x4x4  par 9  lower bound 9  (optimal)  seed 12 blocks
+front    side
+....     ....
+..##     #..#
+..##     #.##
+####     ####
+
+#3  Wed  tier 2  5x5x4  par 12  lower bound 11  seed 14 blocks
+front    side
+.....    .....
+#....    ...##
+###.#    .###.
+.#.##    #####
+
+#4  Thu  tier 2  5x5x4  par 10  lower bound 10  (optimal)  seed 14 blocks
+front    side
+.....    .....
+.....    .....
+#####    ###.#
+#.###    #####
+
+#5  Fri  tier 3  5x5x5  par 16  lower bound 16  (optimal)  seed 19 blocks
+front    side
+#....    ###..
+#....    ##...
+#####    ##...
+###..    ##...
+##...    ##.#.
+
+#6  Sat  tier 3  5x5x5  par 20  lower bound 17  seed 21 blocks
+front    side
+.##..    ...##
+.###.    ##..#
+.###.    .####
+.##..    ##.##
+###..    #.###
+
+#7  Sun  tier 3  5x5x5  par 15  lower bound 13  seed 17 blocks
+front    side
+.....    .....
+.##..    #.#..
+###..    ###..
+##...    ##..#
+##..#    #####
+
+#8  Mon  tier 1  4x4x4  par 8  lower bound 8  (optimal)  seed 10 blocks
+front    side
+..#.     ..#.
+..#.     ..#.
+.##.     ###.
+###.     ###.
+
+#9  Tue  tier 1  4x4x4  par 10  lower bound 10  (optimal)  seed 12 blocks
+front    side
+....     ....
+##..     #.#.
+###.     ####
+###.     ####
+
+#10  Wed  tier 2  5x5x4  par 11  lower bound 10  seed 14 blocks
+front    side
+.....    .....
+##...    .##..
+.#.#.    ##.#.
+####.    #####
+
+#11  Thu  tier 2  5x5x4  par 13  lower bound 11  seed 14 blocks
+front    side
+..##.    ...#.
+..###    ..##.
+..##.    #..##
+.##..    #..##
+
+#12  Fri  tier 3  5x5x5  par 20  lower bound 16  seed 26 blocks
+front    side
+.....    .....
+.####    #.###
+.###.    ###..
+#####    #####
+####.    ####.
+
+#13  Sat  tier 3  5x5x5  par 19  lower bound 19  (optimal)  seed 26 blocks
+front    side
+..##.    .#..#
+..##.    ##.##
+..###    .#..#
+.####    #####
+#####    .####
+
+#14  Sun  tier 3  5x5x5  par 14  lower bound 13  seed 16 blocks
+front    side
+.#...    ..##.
+.#...    ...#.
+####.    ..##.
+.#..#    .#.#.
+.####    ####.
+
+#15  Mon  tier 1  4x4x4  par 9  lower bound 9  (optimal)  seed 12 blocks
+front    side
+...#     .#..
+...#     .#..
+..##     .###
+####     ####
+
+#16  Tue  tier 1  4x4x4  par 9  lower bound 9  (optimal)  seed 10 blocks
+front    side
+.#..     .#..
+.##.     .#..
+.##.     .#..
+####     ###.
+
+#17  Wed  tier 2  5x5x4  par 13  lower bound 13  (optimal)  seed 17 blocks
+front    side
+.....    .....
+###.#    #.#..
+.####    #.#..
+#####    #####
+
+#18  Thu  tier 2  5x5x4  par 11  lower bound 11  (optimal)  seed 16 blocks
+front    side
+.....    .....
+.##..    #..##
+.###.    ##..#
+####.    #####
+
+#19  Fri  tier 3  5x5x5  par 15  lower bound 13  seed 16 blocks
+front    side
+.....    .....
+#..#.    ..##.
+##.##    ####.
+##.#.    ####.
+#..#.    .###.
+
+#20  Sat  tier 3  5x5x5  par 20  lower bound 18  seed 24 blocks
+front    side
+##...    ..#..
+###..    .###.
+#####    .####
+#####    ..###
+.#.##    ..#.#
+
+#21  Sun  tier 3  5x5x5  par 20  lower bound 19  seed 22 blocks
+front    side
+###..    .##..
+##...    .###.
+###..    ####.
+.####    #.#.#
+#####    #.###
+
+#22  Mon  tier 1  4x4x4  par 6  lower bound 6  (optimal)  seed 8 blocks
+front    side
+....     ....
+....     ....
+#.#.     .#.#
+#.##     ####
+
+#23  Tue  tier 1  4x4x4  par 7  lower bound 7  (optimal)  seed 10 blocks
+front    side
+....     ....
+....     ....
+###.     #.##
+####     #.##
+
+#24  Wed  tier 2  5x5x4  par 10  lower bound 10  (optimal)  seed 15 blocks
+front    side
+.....    .....
+#....    ..#..
+#####    ###.#
+#.###    ###.#
+
+#25  Thu  tier 2  5x5x4  par 11  lower bound 10  seed 16 blocks
+front    side
+.....    .....
+..##.    ##...
+.####    ###..
+..###    #.###
+
+#26  Fri  tier 3  5x5x5  par 19  lower bound 18  seed 22 blocks
+front    side
+##...    ...##
+###..    #..#.
+##...    #.##.
+##..#    #####
+#####    ####.
+
+#27  Sat  tier 3  5x5x5  par 15  lower bound 15  (optimal)  seed 19 blocks
+front    side
+#....    ##...
+##...    #....
+##...    ###..
+####.    ##.#.
+##.##    ####.
+
+#28  Sun  tier 3  5x5x5  par 15  lower bound 14  seed 19 blocks
+front    side
+....#    ..#..
+...##    ..###
+....#    ..#..
+#...#    ####.
+#####    #####
+
+#29  Mon  tier 1  4x4x4  par 7  lower bound 7  (optimal)  seed 9 blocks
+front    side
+#...     ..#.
+#...     ..#.
+##..     #.#.
+##.#     ###.
+
+#30  Tue  tier 1  4x4x4  par 9  lower bound 9  (optimal)  seed 10 blocks
+front    side
+....     ....
+.#..     ...#
+####     ##.#
+####     ##.#
+
+#31  Wed  tier 2  5x5x4  par 11  lower bound 11  (optimal)  seed 17 blocks
+front    side
+.#...    ##...
+.#...    .#...
+###..    .####
+####.    .####
+
+#32  Thu  tier 2  5x5x4  par 15  lower bound 12  seed 18 blocks
+front    side
+..##.    ...##
+..##.    .#..#
+.###.    ##.##
+..#.#    ##.##
+
+#33  Fri  tier 3  5x5x5  par 17  lower bound 15  seed 24 blocks
+front    side
+..#..    ..#..
+..###    .##..
+##.#.    ###..
+.###.    .###.
+#####    #####
+
+#34  Sat  tier 3  5x5x5  par 16  lower bound 15  seed 20 blocks
+front    side
+####.    ....#
+.##..    ...##
+..#..    ....#
+#.##.    #..##
+#####    ##.##
+
+#35  Sun  tier 3  5x5x5  par 17  lower bound 16  seed 23 blocks
+front    side
+..#..    ...#.
+.##..    .###.
+###..    ####.
+##..#    .###.
+#####    ####.
+
+#36  Mon  tier 1  4x4x4  par 6  lower bound 6  (optimal)  seed 8 blocks
+front    side
+....     ....
+....     ....
+.#.#     .##.
+####     .###
+
+#37  Tue  tier 1  4x4x4  par 7  lower bound 7  (optimal)  seed 9 blocks
+front    side
+....     ....
+...#     ..#.
+..##     ###.
+.###     ###.
+
+#38  Wed  tier 2  5x5x4  par 13  lower bound 12  seed 17 blocks
+front    side
+....#    .#...
+.####    ###..
+.#..#    .##..
+##.##    #####
+
+#39  Thu  tier 2  5x5x4  par 13  lower bound 12  seed 18 blocks
+front    side
+.#...    ##...
+##...    ##...
+.###.    ##.#.
+.####    #####
+
+#40  Fri  tier 3  5x5x5  par 18  lower bound 17  seed 22 blocks
+front    side
+#....    .##..
+##...    ###..
+##.##    ##..#
+#..#.    ##..#
+##.##    #####
+
+#41  Sat  tier 3  5x5x5  par 16  lower bound 15  seed 21 blocks
+front    side
+.....    .....
+...#.    ....#
+#####    ...##
+####.    .####
+##.#.    #####
+
+#42  Sun  tier 3  5x5x5  par 15  lower bound 14  seed 21 blocks
+front    side
+.....    .....
+.#..#    ##...
+.##.#    ###..
+.####    ###..
+..###    #####
+
+#43  Mon  tier 1  4x4x4  par 8  lower bound 8  (optimal)  seed 10 blocks
+front    side
+....     ....
+...#     ..#.
+.###     #.#.
+.###     ####
+
+#44  Tue  tier 1  4x4x4  par 7  lower bound 7  (optimal)  seed 11 blocks
+front    side
+...#     ...#
+...#     ...#
+.#.#     ..##
+##.#     .###
+
+#45  Wed  tier 2  5x5x4  par 12  lower bound 12  (optimal)  seed 16 blocks
+front    side
+...#.    ....#
+.###.    ....#
+#.#..    ##..#
+#####    #####
+
+#46  Thu  tier 2  5x5x4  par 12  lower bound 11  seed 14 blocks
+front    side
+...#.    ..#..
+...#.    ..#..
+#.###    .####
+#####    #.###
+
+#47  Fri  tier 3  5x5x5  par 16  lower bound 13  seed 16 blocks
+front    side
+.....    .....
+#....    .###.
+###.#    #.#..
+#.###    ####.
+#....    #.#..
+
+#48  Sat  tier 3  5x5x5  par 17  lower bound 15  seed 21 blocks
+front    side
+..##.    ##...
+...#.    ##...
+.#.##    #.##.
+##..#    #.##.
+#####    ####.
+
+#49  Sun  tier 3  5x5x5  par 18  lower bound 17  seed 26 blocks
+front    side
+.....    .....
+.##..    .###.
+##...    .####
+###.#    #####
+#####    ####.
+
+#50  Mon  tier 1  4x4x4  par 10  lower bound 10  (optimal)  seed 11 blocks
+front    side
+##..     .#.#
+##..     .#.#
+##..     .#.#
+####     .###
+
+#51  Tue  tier 1  4x4x4  par 10  lower bound 10  (optimal)  seed 12 blocks
+front    side
+.#..     ...#
+.#.#     ..##
+##.#     ..##
+####     .###
+
+#52  Wed  tier 2  5x5x4  par 9  lower bound 9  (optimal)  seed 12 blocks
+front    side
+.....    .....
+..#..    ...#.
+.##..    ..###
+#####    ###.#
+
+#53  Thu  tier 2  5x5x4  par 10  lower bound 10  (optimal)  seed 13 blocks
+front    side
+...#.    ....#
+..##.    ....#
+.##..    ....#
+#####    ###.#
+
+#54  Fri  tier 3  5x5x5  par 17  lower bound 16  seed 21 blocks
+front    side
+..##.    ###..
+...#.    .#...
+...##    ###..
+.####    ##...
+#####    ###.#
+
+#55  Sat  tier 3  5x5x5  par 17  lower bound 16  seed 25 blocks
+front    side
+#....    ...#.
+##...    ..##.
+###..    .####
+#####    ..###
+##.##    .####
+
+#56  Sun  tier 3  5x5x5  par 21  lower bound 19  seed 24 blocks
+front    side
+...#.    ###..
+...#.    .##..
+.####    .##.#
+#####    #####
+#####    ##..#
+
+#57  Mon  tier 1  4x4x4  par 7  lower bound 6  seed 9 blocks
+front    side
+....     ....
+....     ....
+.#.#     ..#.
+.###     ####
+
+#58  Tue  tier 1  4x4x4  par 6  lower bound 6  (optimal)  seed 8 blocks
+front    side
+....     ....
+....     ....
+#..#     #.#.
+####     ####
+
+#59  Wed  tier 2  5x5x4  par 14  lower bound 14  (optimal)  seed 16 blocks
+front    side
+...#.    ....#
+.####    ..###
+.##.#    .####
+#####    .####
+
+#60  Thu  tier 2  5x5x4  par 12  lower bound 11  seed 17 blocks
+front    side
+.....    .....
+.###.    .##..
+###..    #.##.
+#####    #####

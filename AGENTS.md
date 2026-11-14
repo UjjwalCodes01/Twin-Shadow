@@ -1,52 +1,66 @@
-You are writing a Devvit web application that will be executed on Reddit.com.
+# Twin Shadows
 
-## Tech Stack
+A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The player builds a sculpture of unit cubes whose two shadows must match two target silhouettes. See `README.md` for how the game plays.
 
-- **Frontend**: Three.js, Vite
-- **Backend**: Node.js v22 serverless environment (Devvit), Hono, TRPC
-- **Communication**: tRPC v11 for end-to-end type safety
+## Tech stack
 
-## Layout & Architecture
+- **Client**: plain TypeScript and three.js, built by Vite. No React or other UI framework; the HUD is plain HTML and CSS.
+- **Server**: Hono on Devvit's Node serverless runtime, started in `src/server/index.ts`.
+- **Client to server**: `fetch` against `/api/...` routes that return JSON. No tRPC.
+- **Tests**: Vitest.
+- Node 24 or later.
 
-- `/src/server`: **Backend Code**. This runs in a secure, serverless environment.
-  - `trpc.ts`: Defines the API router and procedures.
-  - `index.ts`: Main server entry point (Hono app).
-  - Access `redis`, `reddit`, and `context` here via `@devvit/web/server`.
-- `/src/client`: **Frontend Code**. This is executed inside of an iFrame on reddit.com
-  - To add an entrypoint, create a HTML file and add to the mapping inside of `devvit.json`
-  - Entrypoints:
-    - `game.html`: The main React entry point (Expanded View).
-    - `splash.html`: The initial React entry point (Inline View). This will be shown in the reddit.com feed. Please keep it fast and keep heavy dependencies inside of `game.html`
-- `/src/shared`: **Shared Code**. Code to share between the client and server
+## Layout
 
-## Frontend
+- `src/shared/`: code used by both sides. `puzzle.ts` (types and the test puzzle), `logic.ts` (the game rules), `api.ts` (response types and validation), `random.ts` (seeded random numbers).
+- `src/client/`: runs in an iframe on reddit.com.
+  - `splash.html` / `splash.ts`: the inline view shown in the feed. Keep it light; no three.js here.
+  - `game.html` / `game.ts`: the expanded view. Loads the puzzle and wires the parts together.
+  - `store.ts`: the one game state store (blocks, rotation, mode, undo stack). No DOM.
+  - `scene.ts`: the three.js board. Reads the store, never writes game state.
+  - `input.ts`: tap handling. `hud.ts`: the HTML panels and controls.
+  - `debug.ts`: temporary debug board states.
+- `src/server/`: `routes/api.ts` (public `/api` routes), `routes/menu.ts` and `routes/triggers.ts` (post creation), `core/` (helpers), `data/puzzles.json` (generated puzzle queue).
+- `src/generator/`: the offline puzzle generator. Runs on a developer machine with `npm run generate`, never on the server. `data/solutions.json` holds seed sculptures and par solutions.
+- `tools/`: TypeScript project configs and `generate.mjs`, the generator runner.
+- `devvit.json`: app config: entry points, the menu item, the install trigger.
 
-### Rules
+## Rules
 
-- Instead of `window.location` or `window.assign`, use `navigateTo` from `@devvit/web/client`
+- **Game rules live in `src/shared/logic.ts`** as pure functions with no DOM and no three.js imports, because the server reuses them to validate play. Do not reimplement a rule elsewhere; call these.
+- **Never import `src/generator/data/solutions.json`** from client or server code. It must not reach players.
+- **Validate before trusting**: anything fetched from the server goes through the `parse...` functions in `src/shared/api.ts` before use.
+- Every server route the client calls must start with `/api/`. Menu and trigger routes are under `/internal/` and must be registered in `devvit.json`.
+- Coordinates: x runs left to right, y runs up from the floor, z runs front to back, all from 0. A sculpture is a `Set<string>` of `"x,y,z"` keys. Silhouettes are string arrays, top row first, `#` lit and `.` empty.
+- Code marked `TEMPORARY` is debug-only and is removed before release. Keep new debug code behind the same dev-subreddit check and mark it the same way.
+- The game itself has no Reddit theming: no Snoo, karma or subreddit references.
+- Add no dependencies without asking.
 
-### Limitations
+## TypeScript style
 
-- `window.alert`: Use `showToast` or `showForm` from `@devvit/web/client`
-- File downloads: Use clipboard API with `showToast` to confirm
-- Geolocation, camera, microphone, and notifications web APIs: No alternatives
-- Inline script tags inside of `html` files: Use a script tag and separate js/ts file
+The compiler is strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noUnusedLocals`, `noUnusedParameters`).
+
+- Never cast types (`as Foo`). Narrow with checks or type guards instead. `as const` is fine.
+- Prefer type aliases over interfaces.
+- Prefer named exports over default exports.
+- Import siblings without a file extension (`'./logic'`).
+
+## Devvit specifics
+
+- Use Devvit Web only. Do not use blocks or `@devvit/public-api`.
+- Server-side Reddit access (`context`, `reddit`, `redis`) comes from `@devvit/web/server`.
+- In the client, use `navigateTo` from `@devvit/web/client` instead of `window.location`, and `showToast` or `showForm` instead of `window.alert`.
+- No inline `<script>` in HTML files; use a separate `.ts` file.
+- Geolocation, camera, microphone and notification web APIs are not available.
+- Docs: https://developers.reddit.com/docs/llms.txt
 
 ## Commands
 
-- `npm run type-check`: Check typescript types
-- `npm run lint`: Check the linter
-- `npm run test -- my-file-name`: Run tests isolated to a file
+- `npm test`: run all unit tests. `npm test -- logic` runs the files matching a name.
+- `npm run test:types`: type-check every project.
+- `npm run lint`: lint `src/`.
+- `npm run build`: build client and server into `dist/`.
+- `npm run generate`: regenerate the puzzle queue (takes under a minute). Commit the three files it writes.
+- `npm run dev`: start a playtest in the app's test subreddit. Needs a Reddit login, so the developer runs this.
 
-## Code Style
-
-- Prefer type aliases over interfaces when writing typescript
-- Prefer named exports over default exports
-- Never cast typescript types
-
-## Global Rules
-
-- You may find code that references blocks or `@devvit/public-api` while building a feature. Do NOT use this code as this project is configured to use Devvit web only.
-- Whenever you add an endpoint for a new menu item action, ensure that you've added the corresponding mapping to `devvit.json` so that it is properly registered
-
-Docs: https://developers.reddit.com/docs/llms.txt.
+Run the tests, the type-check and the linter before calling a change done.

@@ -3,6 +3,7 @@
 
 import { canPlace, formatSilhouette, parseKey, projectFront, projectSide, toKey } from '../shared/logic';
 import { TEST_PUZZLE, TEST_SOLUTION, type Puzzle, type Size } from '../shared/puzzle';
+import { createRandom } from '../shared/random';
 
 export type DebugSetup = { puzzle: Puzzle; blocks: readonly string[] };
 
@@ -21,26 +22,14 @@ const STEPS = [
   [0, 0, -1],
 ] as const;
 
-/** Small seeded generator (mulberry32), so "big" is the same on every load. */
-const seededRandom = (seed: number): (() => number) => {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
-
 /**
  * A 5x5x5 board holding a random sculpture grown outward from one floor cell,
  * so every block connects to the floor. Both silhouettes are derived from it,
  * which means the board starts solved.
  */
 const bigSetup = (): DebugSetup => {
-  const random = seededRandom(BIG_SEED);
-  const pick = (count: number): number => Math.floor(random() * count);
+  const random = createRandom(BIG_SEED);
+  const pick = random.int;
   const blocks = [toKey(pick(BIG_SIZE.w), 0, pick(BIG_SIZE.d))];
   const placed = new Set(blocks);
 
@@ -58,10 +47,13 @@ const bigSetup = (): DebugSetup => {
   return {
     puzzle: {
       id: 'debug-big',
+      number: 0,
+      tier: 3,
       size: BIG_SIZE,
       front: formatSilhouette(projectFront(placed, BIG_SIZE)),
       side: formatSilhouette(projectSide(placed, BIG_SIZE)),
       par: blocks.length,
+      parIsOptimal: false,
     },
     blocks,
   };

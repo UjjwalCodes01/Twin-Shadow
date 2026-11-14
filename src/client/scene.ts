@@ -39,7 +39,8 @@ const COLORS = {
 const ROTATE_MS = 200;
 const REJECT_FLASH_MS = 180;
 const MAX_PIXEL_RATIO = 2;
-const FRAME_PADDING = 0.5;
+/** Empty margin on each side of the board, as a share of the frame. */
+const FRAME_MARGIN = 0.025;
 const CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
 
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
@@ -310,8 +311,9 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     const cosElevation = Math.sqrt(1 - sinElevation ** 2);
     const top = radius * sinElevation + h * cosElevation;
     const bottom = -radius * sinElevation;
-    const contentWidth = 2 * radius + 2 * FRAME_PADDING;
-    const contentHeight = top - bottom + 2 * FRAME_PADDING;
+    // Whichever of width or height runs out first sets the scale.
+    const contentWidth = (2 * radius) / (1 - 2 * FRAME_MARGIN);
+    const contentHeight = (top - bottom) / (1 - 2 * FRAME_MARGIN);
     const aspect = width / height;
     const viewHeight = Math.max(contentHeight, contentWidth / aspect);
     const viewWidth = viewHeight * aspect;

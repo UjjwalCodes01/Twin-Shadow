@@ -27,10 +27,13 @@ describe('isSolved', () => {
     // Two blocks touching only at an edge: both shadows match, 1,1,0 floats.
     const puzzle: Puzzle = {
       id: 'floating',
+      number: 0,
+      tier: 1,
       size: { w: 2, d: 1, h: 2 },
       front: ['.#', '#.'],
       side: ['#', '#'],
       par: 2,
+      parIsOptimal: false,
     };
     const blocks = new Set(['0,0,0', '1,1,0']);
     expect(findFloating(blocks)).toEqual(['1,1,0']);

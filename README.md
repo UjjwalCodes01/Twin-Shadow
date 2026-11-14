@@ -2,7 +2,7 @@
 
 A daily 3D puzzle that runs as an interactive post on Reddit. Build one sculpture out of blocks so that its two shadows match the two target silhouettes.
 
-This is an early prototype with one fixed puzzle. Daily puzzles, scoring and leaderboards are not built yet.
+This is an early prototype. It plays one fixed puzzle; a queue of generated daily puzzles exists but is not scheduled yet, and scoring and leaderboards are not built.
 
 ## How to play
 
@@ -27,6 +27,7 @@ Requires Node 24 or later.
 | `npm run test:types` | Type-checks the project |
 | `npm run lint` | Lints the source |
 | `npm run build` | Builds the client and server into `dist/` |
+| `npm run generate` | Regenerates the puzzle queue |
 | `npm run deploy` | Type-checks, lints and uploads a new version |
 
 The game cannot load its puzzle outside Reddit, because the server only runs there. To try a local build, serve `dist/client` with any static file server and open `game.html?debug=1`.
@@ -38,6 +39,7 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
 | `src/client/` | The three.js board, tap input and the HTML controls |
 | `src/server/` | The Hono server: the puzzle endpoint and post creation |
+| `src/generator/` | The offline puzzle generator, run with `npm run generate` |
 | `devvit.json` | App configuration: entry points, menu item and install trigger |
 
 Built with [Devvit Web](https://developers.reddit.com/), [three.js](https://threejs.org/), [Hono](https://hono.dev/), [Vite](https://vite.dev/) and TypeScript.

@@ -1,4 +1,4 @@
-import { parsePuzzleResponse } from '../shared/api';
+import { parseDebugPuzzleResponse, parsePuzzleResponse } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { DEBUG_STATES, debugSetup } from './debug';
 import { createHud } from './hud';
@@ -68,17 +68,48 @@ const loadDebugState = (state: string | null, rotation = 0): void => {
   startGame(setup.puzzle, setup.blocks, rotation);
 };
 
+// Steps through the generated queue with the dev-only endpoint.
+let queueNumber = 0;
+const loadQueuePuzzle = async (number: number, label: HTMLElement): Promise<void> => {
+  try {
+    const response = await fetch(`/api/debug/puzzle/${number}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body: unknown = await response.json();
+    const parsed = parseDebugPuzzleResponse(body);
+    if (!parsed) throw new Error('Response is not a valid puzzle');
+    const { puzzle, count } = parsed;
+    queueNumber = puzzle.number;
+    startGame(puzzle);
+    label.textContent = `#${puzzle.number}/${count} tier ${puzzle.tier} par ${puzzle.par}${puzzle.parIsOptimal ? '' : '?'}`;
+  } catch (error) {
+    console.error(`Could not load puzzle ${number}:`, error);
+    label.textContent = `#${number} unavailable`;
+  }
+};
+
 const showDebugBar = (): void => {
   const bar = element('debug-bar');
   if (!bar.hidden) return;
   bar.hidden = false;
-  for (const state of DEBUG_STATES) {
-    const stateButton = document.createElement('button');
-    stateButton.type = 'button';
-    stateButton.textContent = state;
-    stateButton.addEventListener('click', () => loadDebugState(state));
-    bar.append(stateButton);
-  }
+  const addButton = (parent: HTMLElement, text: string, action: () => void): void => {
+    const debugButton = document.createElement('button');
+    debugButton.type = 'button';
+    debugButton.textContent = text;
+    debugButton.addEventListener('click', action);
+    parent.append(debugButton);
+  };
+  for (const state of DEBUG_STATES) addButton(bar, state, () => loadDebugState(state));
+
+  // Second row: step through the generated queue.
+  const queueRow = document.createElement('div');
+  queueRow.className = 'debug-queue';
+  const label = document.createElement('span');
+  label.className = 'debug-label';
+  label.textContent = 'queue';
+  addButton(queueRow, 'prev', () => void loadQueuePuzzle(Math.max(queueNumber - 1, 1), label));
+  queueRow.append(label);
+  addButton(queueRow, 'next', () => void loadQueuePuzzle(queueNumber + 1, label));
+  bar.append(queueRow);
   Object.assign(window, {
     twinShadowsDebug: {
       load: loadDebugState,

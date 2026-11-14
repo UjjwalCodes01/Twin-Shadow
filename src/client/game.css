@@ -275,9 +275,25 @@ body:not([data-state='ready']) .controls {
 .debug-bar {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 4px;
   font-size: 0.8rem;
+}
+
+.debug-queue {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.debug-label {
+  min-width: 150px;
+  color: var(--ink-soft);
+  text-align: center;
 }
 
 .controls .debug-bar button {
