@@ -70,6 +70,10 @@ export const projectSide = (blocks: Blocks, size: Size): Grid =>
 export const parseSilhouette = (rows: readonly string[]): Grid =>
   [...rows].reverse().map((row) => [...row].map((char) => char === '#'));
 
+/** The reverse of parseSilhouette: a grid back to top-first '#'/'.' rows. */
+export const formatSilhouette = (grid: Grid): string[] =>
+  [...grid].reverse().map((row) => row.map((lit) => (lit ? '#' : '.')).join(''));
+
 /** Compares a shadow with its target, cell by cell. Same shape as `target`. */
 export const diffShadow = (actual: Grid, target: Grid): CellState[][] =>
   target.map((targetRow, y) =>

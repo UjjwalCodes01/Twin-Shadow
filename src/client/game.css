@@ -1,3 +1,17 @@
+/* Placeholder styling. Art direction replaces this later. The two accents are
+   repeated in scene.ts for the walls: keep them in step. */
+:root {
+  --page: #e9e6df;
+  --ink: #26303d;
+  --ink-soft: #55606e;
+  --surface: #f6f3ec;
+  --line: #c9c3b6;
+  --front: #1f7a6d;
+  --side: #7a4fb0;
+  --extra: #d9483b;
+  --floating: #b26b00;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -5,24 +19,37 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #e9e6df;
-  color: #26303d;
+  background: var(--page);
+  color: var(--ink);
 }
 
+/* Portrait first: readout on top, board in the middle, controls in thumb reach. */
 body {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'readout'
+    'stage'
+    'controls';
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* The board fills whatever space the post is given. */
+/* --- Board ---------------------------------------------------------------- */
 .stage {
+  grid-area: stage;
   position: relative;
-  flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -32,25 +59,232 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  /* Every interaction is a tap, so the browser has no gesture to handle here. */
+  touch-action: none;
 }
 
-/* TEMPORARY debug bar: remove in step 3 */
-.debug-bar {
+/* --- Readout: two silhouette panels and the status between them ------------ */
+.readout {
+  grid-area: readout;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 8px;
-  padding: 8px;
+  padding: 8px 12px 4px;
 }
 
-.debug-bar button {
+.panel {
+  --accent: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 6px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+.panel.front {
+  --accent: var(--front);
+}
+
+.panel.side {
+  --accent: var(--side);
+}
+
+.panel-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.panel.solved {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.panel.solved .panel-label::after {
+  content: ' \2713';
+}
+
+.panel-grid {
+  display: grid;
+}
+
+.cell {
+  border-radius: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.cell.match {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.cell.missing {
+  background: transparent;
+  border: 2px solid var(--accent);
+}
+
+.cell.extra {
+  background: var(--extra);
+  border-color: var(--extra);
+}
+
+.status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+  text-align: center;
+}
+
+.block-count {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.floating-warning {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--floating);
+}
+
+.win-banner {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+/* --- Controls -------------------------------------------------------------- */
+.controls {
+  grid-area: controls;
+  display: grid;
+  grid-template-columns: 2.5fr repeat(4, 1fr);
+  gap: 6px;
+  padding: 6px 8px 10px;
+}
+
+.controls button {
   min-width: 44px;
+  min-height: 48px;
+  padding: 0 4px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.controls button:disabled {
+  border-color: var(--line);
+  color: var(--line);
+  cursor: default;
+}
+
+.controls button svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin: 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.mode button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.mode button:last-child {
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+
+.mode button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+#reset.armed {
+  background: var(--extra);
+  border-color: var(--extra);
+  color: #ffffff;
+}
+
+.debug-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.debug-bar a {
+  display: flex;
+  align-items: center;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid #26303d;
-  border-radius: 8px;
-  background: #f6f3ec;
-  color: #26303d;
-  font-size: 0.9rem;
-  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+/* --- Landscape on a short screen: readout left, board centre, controls right */
+@media (orientation: landscape) and (max-height: 520px) {
+  body {
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'readout stage controls';
+  }
+
+  .readout {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+  }
+
+  .status {
+    flex: none;
+    max-width: 104px;
+    padding-top: 0;
+  }
+
+  .win-banner {
+    font-size: 0.8rem;
+  }
+
+  .controls {
+    grid-template-columns: 1fr 1fr;
+    align-content: center;
+    width: 132px;
+    padding: 6px 8px;
+  }
+
+  .mode {
+    grid-column: 1 / -1;
+  }
+
+  .debug-bar {
+    flex-wrap: wrap;
+  }
 }

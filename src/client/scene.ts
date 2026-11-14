@@ -12,38 +12,61 @@ import {
   parseSilhouette,
   projectFront,
   projectSide,
+  toKey,
   type CellState,
 } from '../shared/logic';
 import type { Puzzle } from '../shared/puzzle';
 import type { GameState, Store } from './store';
 
-// Placeholder palette. Art direction replaces this later.
+// Placeholder palette. Art direction replaces this later. The two accents are
+// repeated in game.css for the HUD panels: keep them in step.
 const COLORS = {
   background: 0xe9e6df,
   floorBase: 0xbdb8ad,
   floorTile: 0xd6d1c6,
-  wall: 0xf6f3ec,
   wallGrid: 0xd9d4c8,
-  shadowMatch: 0x3b4252,
-  shadowMissing: 0x3b4252,
+  frontWall: 0xeef4f2,
+  frontAccent: 0x1f7a6d,
+  sideWall: 0xf3eff8,
+  sideAccent: 0x7a4fb0,
   shadowExtra: 0xd9483b,
   block: 0x7aa2c8,
   blockFloating: 0xe6a23c,
+  blockRejected: 0xd9483b,
   blockEdge: 0x26303d,
 };
 
 const ROTATE_MS = 200;
+const REJECT_FLASH_MS = 180;
 const MAX_PIXEL_RATIO = 2;
 const FRAME_PADDING = 0.5;
 const CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
 
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 type BlockMesh = THREE.Mesh<THREE.BoxGeometry, THREE.MeshLambertMaterial>;
+type WallKind = 'front' | 'side';
 type WallCell = { fill: BasicMesh; outline: BasicMesh };
-type Wall = { shows: 'front' | 'side'; cells: WallCell[][] };
+type Wall = { shows: WallKind; cells: WallCell[][] };
 type Tween = { from: number; to: number; startedAt: number | null };
 
-export type SceneHandle = { dispose: () => void };
+/** What a tap landed on. Walls are never returned. */
+export type Pick =
+  | { kind: 'floor'; key: string }
+  | { kind: 'block'; key: string; neighbour: string };
+
+export type SceneHandle = {
+  /** The floor cell or block face under a point given in client pixels. */
+  pick: (clientX: number, clientY: number) => Pick | null;
+  /** True while the board is turning. */
+  isRotating: () => boolean;
+  /** Shows a faint cube at `key`, or hides it with null. */
+  setGhost: (key: string | null) => void;
+  /** Briefly tints a block to show a tap on it was refused. */
+  flashBlock: (key: string) => void;
+  /** Draws immediately instead of on the next frame. */
+  renderNow: () => void;
+  dispose: () => void;
+};
 
 /** A flat square frame facing +z: `side` across, `thickness` wide. */
 const squareFrame = (side: number, thickness: number): THREE.RingGeometry =>
@@ -56,6 +79,9 @@ const squareFrame = (side: number, thickness: number): THREE.RingGeometry =>
   );
 
 const basic = (color: number): THREE.MeshBasicMaterial => new THREE.MeshBasicMaterial({ color });
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(Math.max(value, min), max);
 
 export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: Store): SceneHandle => {
   const { w, d, h } = puzzle.size;
@@ -84,6 +110,8 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     new THREE.Vector3(x + 0.5 - w / 2, y + 0.5, -(z + 0.5 - d / 2));
 
   // --- Floor ---------------------------------------------------------------
+  // The base plane is the tap target, so the thin gaps between tiles are not
+  // dead spots. The tiles on top are only decoration.
   const floorBase: BasicMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), basic(COLORS.floorBase));
   floorBase.rotation.x = -Math.PI / 2;
   board.add(floorBase);
@@ -105,30 +133,32 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   // the two walls nearest the viewer vanish and one of each kind stays.
   // Cells are placed by board coordinate (`flip` undoes the wall's own turn),
   // so a shadow cell always sits directly behind the blocks that cast it.
-  const wallMaterial = basic(COLORS.wall);
   const gridMaterial = basic(COLORS.wallGrid);
-  const matchMaterial = basic(COLORS.shadowMatch);
-  const missingMaterial = basic(COLORS.shadowMissing);
   const extraMaterial = basic(COLORS.shadowExtra);
+  const wallMaterials: Record<WallKind, { backing: THREE.MeshBasicMaterial; accent: THREE.MeshBasicMaterial }> = {
+    front: { backing: basic(COLORS.frontWall), accent: basic(COLORS.frontAccent) },
+    side: { backing: basic(COLORS.sideWall), accent: basic(COLORS.sideAccent) },
+  };
   const gridGeometry = squareFrame(1, 0.02);
   const outlineGeometry = squareFrame(0.8, 0.08);
   const fillGeometry = new THREE.PlaneGeometry(0.9, 0.9);
 
   const buildWall = (
-    shows: Wall['shows'],
+    shows: WallKind,
     columns: number,
     position: THREE.Vector3,
     rotationY: number,
     flip: 1 | -1
   ): Wall => {
+    const { backing, accent } = wallMaterials[shows];
     const group = new THREE.Group();
     group.position.copy(position);
     group.rotation.y = rotationY;
     board.add(group);
 
-    const backing: BasicMesh = new THREE.Mesh(new THREE.PlaneGeometry(columns, h), wallMaterial);
-    backing.position.set(0, h / 2, 0);
-    group.add(backing);
+    const back: BasicMesh = new THREE.Mesh(new THREE.PlaneGeometry(columns, h), backing);
+    back.position.set(0, h / 2, 0);
+    group.add(back);
 
     const cells: WallCell[][] = [];
     for (let y = 0; y < h; y++) {
@@ -137,9 +167,9 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
         const localX = flip * (column + 0.5 - columns / 2);
         const grid: BasicMesh = new THREE.Mesh(gridGeometry, gridMaterial);
         grid.position.set(localX, y + 0.5, 0.002);
-        const fill: BasicMesh = new THREE.Mesh(fillGeometry, matchMaterial);
+        const fill: BasicMesh = new THREE.Mesh(fillGeometry, accent);
         fill.position.set(localX, y + 0.5, 0.004);
-        const outline: BasicMesh = new THREE.Mesh(outlineGeometry, missingMaterial);
+        const outline: BasicMesh = new THREE.Mesh(outlineGeometry, accent);
         outline.position.set(localX, y + 0.5, 0.004);
         group.add(grid, fill, outline);
         row.push({ fill, outline });
@@ -157,11 +187,12 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   ];
 
   const paintWall = (wall: Wall, states: CellState[][]): void => {
+    const { accent } = wallMaterials[wall.shows];
     wall.cells.forEach((row, y) => {
       row.forEach((cell, column) => {
         const state = states[y]?.[column] ?? 'empty';
         cell.fill.visible = state === 'match' || state === 'extra';
-        cell.fill.material = state === 'extra' ? extraMaterial : matchMaterial;
+        cell.fill.material = state === 'extra' ? extraMaterial : accent;
         cell.outline.visible = state === 'missing';
       });
     });
@@ -176,31 +207,59 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     color: COLORS.blockFloating,
     ...blockOptions,
   });
+  const rejectedMaterial = new THREE.MeshLambertMaterial({
+    color: COLORS.blockRejected,
+    ...blockOptions,
+  });
   const edgeGeometry = new THREE.EdgesGeometry(blockGeometry);
   const edgeMaterial = new THREE.LineBasicMaterial({ color: COLORS.blockEdge });
   const blockMeshes = new Map<string, BlockMesh>();
+  const keyByMesh = new Map<THREE.Object3D, string>();
+  const flashing = new Set<string>();
+  const flashTimers = new Set<number>();
+
+  const paintBlocks = (blocks: ReadonlySet<string>): void => {
+    const floating = new Set(findFloating(blocks));
+    for (const [key, mesh] of blockMeshes) {
+      if (flashing.has(key)) mesh.material = rejectedMaterial;
+      else mesh.material = floating.has(key) ? floatingMaterial : blockMaterial;
+    }
+  };
 
   const syncBlocks = (state: GameState): void => {
     for (const [key, mesh] of blockMeshes) {
       if (!state.blocks.has(key)) {
         board.remove(mesh);
         blockMeshes.delete(key);
+        keyByMesh.delete(mesh);
       }
     }
-    const floating = new Set(findFloating(state.blocks));
     for (const key of state.blocks) {
-      let mesh = blockMeshes.get(key);
-      if (!mesh) {
-        const { x, y, z } = parseKey(key);
-        mesh = new THREE.Mesh(blockGeometry, blockMaterial);
-        mesh.position.copy(cellPosition(x, y, z));
-        mesh.add(new THREE.LineSegments(edgeGeometry, edgeMaterial));
-        board.add(mesh);
-        blockMeshes.set(key, mesh);
-      }
-      mesh.material = floating.has(key) ? floatingMaterial : blockMaterial;
+      if (blockMeshes.has(key)) continue;
+      const { x, y, z } = parseKey(key);
+      const mesh: BlockMesh = new THREE.Mesh(blockGeometry, blockMaterial);
+      mesh.position.copy(cellPosition(x, y, z));
+      mesh.add(new THREE.LineSegments(edgeGeometry, edgeMaterial));
+      board.add(mesh);
+      blockMeshes.set(key, mesh);
+      keyByMesh.set(mesh, key);
     }
+    paintBlocks(state.blocks);
   };
+
+  // Hover preview for mouse users. Never a tap target.
+  const ghost = new THREE.Mesh(
+    blockGeometry,
+    new THREE.MeshBasicMaterial({
+      color: COLORS.block,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    })
+  );
+  ghost.visible = false;
+  board.add(ghost);
+  let ghostKey: string | null = null;
 
   // --- Rendering -----------------------------------------------------------
   let frame = 0;
@@ -278,15 +337,86 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(container);
 
+  // --- Picking -------------------------------------------------------------
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  const pick = (clientX: number, clientY: number): Pick | null => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    pointer.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    // Rendering is on demand, so matrices may be stale since the last change.
+    scene.updateMatrixWorld();
+    camera.updateMatrixWorld();
+    raycaster.setFromCamera(pointer, camera);
+    // Nearest hit wins: a block in front of a floor tile takes the tap.
+    const hit = raycaster.intersectObjects([floorBase, ...blockMeshes.values()], false)[0];
+    if (!hit) return null;
+
+    if (hit.object === floorBase) {
+      const local = board.worldToLocal(hit.point.clone());
+      const x = clamp(Math.floor(local.x + w / 2), 0, w - 1);
+      const z = clamp(Math.floor(d / 2 - local.z), 0, d - 1);
+      return { kind: 'floor', key: toKey(x, 0, z) };
+    }
+
+    const key = keyByMesh.get(hit.object);
+    const normal = hit.face?.normal;
+    if (key === undefined || !normal) return null;
+    // Blocks are not rotated inside the board group, so the face normal is
+    // already in board space. Flip z back to game coordinates.
+    const cell = parseKey(key);
+    const neighbour = toKey(
+      cell.x + Math.round(normal.x),
+      cell.y + Math.round(normal.y),
+      cell.z - Math.round(normal.z)
+    );
+    return { kind: 'block', key, neighbour };
+  };
+
+  const setGhost = (key: string | null): void => {
+    if (key === ghostKey) return;
+    ghostKey = key;
+    ghost.visible = key !== null;
+    if (key !== null) {
+      const { x, y, z } = parseKey(key);
+      ghost.position.copy(cellPosition(x, y, z));
+    }
+    requestRender();
+  };
+
+  const flashBlock = (key: string): void => {
+    if (!blockMeshes.has(key) || flashing.has(key)) return;
+    flashing.add(key);
+    paintBlocks(store.getState().blocks);
+    requestRender();
+    const timer = window.setTimeout(() => {
+      flashTimers.delete(timer);
+      flashing.delete(key);
+      paintBlocks(store.getState().blocks);
+      requestRender();
+    }, REJECT_FLASH_MS);
+    flashTimers.add(timer);
+  };
+
   board.rotation.y = angleFor(store.getState());
   const unsubscribe = store.subscribe(sync);
   sync(store.getState());
   resize();
 
   return {
+    pick,
+    isRotating: () => tween !== null,
+    setGhost,
+    flashBlock,
+    renderNow,
     dispose: () => {
       unsubscribe();
       resizeObserver.disconnect();
+      for (const timer of flashTimers) window.clearTimeout(timer);
       if (frame !== 0) cancelAnimationFrame(frame);
       renderer.dispose();
     },

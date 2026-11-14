@@ -15,17 +15,48 @@
     <title>Twin Shadows</title>
   </head>
   <body>
-    <div class="stage">
+    <header class="readout">
+      <section class="panel front" id="panel-front" aria-label="Front shadow">
+        <h2 class="panel-label">Front</h2>
+        <div class="panel-grid" id="panel-front-grid"></div>
+      </section>
+      <div class="status">
+        <p class="block-count" id="block-count">0 blocks</p>
+        <p class="floating-warning" id="floating-warning" hidden></p>
+        <p class="win-banner" id="win-banner" role="status" hidden></p>
+      </div>
+      <section class="panel side" id="panel-side" aria-label="Side shadow">
+        <h2 class="panel-label">Side</h2>
+        <div class="panel-grid" id="panel-side-grid"></div>
+      </section>
+    </header>
+
+    <main class="stage">
       <canvas id="board"></canvas>
-    </div>
-    <!-- TEMPORARY debug bar: remove in step 3 -->
-    <div class="debug-bar">
-      <button id="debug-rotate-left" type="button">Rotate left</button>
-      <button id="debug-rotate-right" type="button">Rotate right</button>
-      <button id="debug-empty" type="button">Empty</button>
-      <button id="debug-solution" type="button">Solution</button>
-      <button id="debug-broken" type="button">Broken</button>
-    </div>
+    </main>
+
+    <footer class="controls">
+      <div class="mode" role="group" aria-label="Tap mode">
+        <button id="mode-add" type="button" aria-pressed="true">Add</button>
+        <button id="mode-remove" type="button" aria-pressed="false">Remove</button>
+      </div>
+      <button id="rotate-left" type="button" aria-label="Rotate left">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12a7 7 0 1 0 2.6-5.4" />
+          <path d="M8 2.5v4.6H3.4" />
+        </svg>
+      </button>
+      <button id="rotate-right" type="button" aria-label="Rotate right">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M19 12a7 7 0 1 1-2.6-5.4" />
+          <path d="M16 2.5v4.6h4.6" />
+        </svg>
+      </button>
+      <button id="undo" type="button" disabled>Undo</button>
+      <button id="reset" type="button" disabled>Reset</button>
+      <nav class="debug-bar" id="debug-bar" aria-label="Debug states" hidden></nav>
+    </footer>
+
     <script type="module" src="game.ts" defer></script>
   </body>
 </html>

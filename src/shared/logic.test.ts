@@ -3,6 +3,7 @@ import {
   canPlace,
   diffShadow,
   findFloating,
+  formatSilhouette,
   isSolved,
   parseSilhouette,
   projectFront,
@@ -65,6 +66,11 @@ describe('shadows', () => {
       [true, true, true],
       [false, false, false],
     ]);
+  });
+
+  it('formats a grid back into the rows it was parsed from', () => {
+    expect(formatSilhouette(parseSilhouette(TEST_PUZZLE.front))).toEqual(TEST_PUZZLE.front);
+    expect(formatSilhouette(projectSide(solution(), size))).toEqual(TEST_PUZZLE.side);
   });
 
   it('projects the solution onto both targets', () => {
