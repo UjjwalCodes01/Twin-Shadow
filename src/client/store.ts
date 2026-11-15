@@ -14,6 +14,11 @@ export type GameState = {
   mode: Mode;
   /** Earlier boards, oldest first. Undo pops the last one. */
   undoStack: readonly ReadonlySet<string>[];
+  /**
+   * True while the board shows someone else's sculpture. Nothing can be
+   * edited then; only rotating works.
+   */
+  viewing: boolean;
 };
 
 export type Listener = (state: GameState) => void;
@@ -30,6 +35,14 @@ export type Store = {
   reset: () => void;
   setMode: (mode: Mode) => void;
   rotate: (quarterTurns: number) => void;
+  /**
+   * Shows another sculpture on the board, read-only. The player's own board
+   * and undo stack are set aside the first time, and kept while stepping
+   * from one viewed sculpture to the next.
+   */
+  view: (blocks: Iterable<string>) => void;
+  /** Leaves viewing mode and puts the player's own board back exactly as it was. */
+  endView: () => void;
 };
 
 export const createStore = (size: Size, initialBlocks: Iterable<string> = []): Store => {
@@ -38,7 +51,10 @@ export const createStore = (size: Size, initialBlocks: Iterable<string> = []): S
     rotation: 0,
     mode: 'add',
     undoStack: [],
+    viewing: false,
   };
+  // The player's own board, set aside while they look at someone else's.
+  let own: Pick<GameState, 'blocks' | 'undoStack'> | null = null;
   const listeners = new Set<Listener>();
 
   const update = (changes: Partial<GameState>): void => {
@@ -58,27 +74,38 @@ export const createStore = (size: Size, initialBlocks: Iterable<string> = []): S
       };
     },
     add: (key) => {
-      if (!canPlace(key, state.blocks, size)) return false;
+      if (state.viewing || !canPlace(key, state.blocks, size)) return false;
       changeBlocks(new Set(state.blocks).add(key));
       return true;
     },
     remove: (key) => {
-      if (!state.blocks.has(key)) return false;
+      if (state.viewing || !state.blocks.has(key)) return false;
       const next = new Set(state.blocks);
       next.delete(key);
       changeBlocks(next);
       return true;
     },
     undo: () => {
+      if (state.viewing) return;
       const previous = state.undoStack.at(-1);
       if (previous) update({ blocks: previous, undoStack: state.undoStack.slice(0, -1) });
     },
     reset: () => {
-      if (state.blocks.size > 0) changeBlocks(new Set());
+      if (!state.viewing && state.blocks.size > 0) changeBlocks(new Set());
     },
     setMode: (mode) => {
       if (mode !== state.mode) update({ mode });
     },
     rotate: (quarterTurns) => update({ rotation: state.rotation + quarterTurns }),
+    view: (blocks) => {
+      own ??= { blocks: state.blocks, undoStack: state.undoStack };
+      update({ blocks: new Set(blocks), undoStack: [], viewing: true });
+    },
+    endView: () => {
+      if (!own) return;
+      const { blocks, undoStack } = own;
+      own = null;
+      update({ blocks, undoStack, viewing: false });
+    },
   };
 };

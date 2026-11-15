@@ -2,7 +2,7 @@
 
 A daily 3D puzzle that runs as an interactive post on Reddit. Build one sculpture out of blocks so that its two shadows match the two target silhouettes.
 
-This is an early prototype. A new puzzle is posted each day from a generated queue, easier early in the week and harder towards the weekend, and each post keeps its own puzzle. You can submit one solution per puzzle. The result card then shows your stars, your rank among everyone who solved it, how common your exact sculpture is, and your streak. The solver gallery is not built yet.
+This is an early prototype. A new puzzle is posted each day from a generated queue, easier early in the week and harder towards the weekend, and each post keeps its own puzzle. You can submit one solution per puzzle. The result card then shows your stars, your rank among everyone who solved it, how common your exact sculpture is, and your streak, and from there you can look through what other players built.
 
 ## How to play
 
@@ -17,7 +17,8 @@ This is an early prototype. A new puzzle is posted each day from a generated que
 - Solving is only the start: the goal is to use as few blocks as you can. Par is shown next to your block count. Press **Submit** when you are happy; only your first submission for a puzzle counts.
 - Stars: three at or under par, two within three blocks of par, one for any other solve.
 - After you submit, a result card shows your rank (fewest blocks first, and equal counts share a rank), the leaderboard, and whether anyone else built exactly the same sculpture. **Results** in the top bar opens it again.
-- Your streak counts daily puzzles solved in a row, each on the day it was the newest. Solving an older puzzle never changes it.
+- **See other sculptures** on the result card lists every different sculpture players submitted, rarest or leanest first. Tap one to see it on the board; you can rotate it but not change it, and **Back to mine** returns your own board. The list only opens once you have submitted.
+- Your streak counts daily puzzles solved in a row, each on the day it was the newest. Solving an older puzzle never changes it. A best streak of 3, 7 or 30 days earns a flair in the community.
 
 ## Development
 
@@ -42,7 +43,7 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | --- | --- |
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
 | `src/client/` | The three.js board, tap input and the HTML controls |
-| `src/server/` | The Hono server: the puzzle, submit and result endpoints, post creation, the daily job, leaderboards and streaks |
+| `src/server/` | The Hono server: the puzzle, submit, result and gallery endpoints, post creation, the daily job, leaderboards, streaks and flair |
 | `src/generator/` | The offline puzzle generator, run with `npm run generate` |
 | `devvit.json` | App configuration: entry points, menu item, install trigger and the scheduled task |
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockText, ordinal, rankText, rarityText, starText, streakText } from './result';
+import { blockText, ordinal, rankText, rarityText, recordText, starText, streakText } from './result';
 
 describe('ordinal', () => {
   it('uses st, nd, rd and th', () => {
@@ -47,6 +47,17 @@ describe('streakText', () => {
     expect(streakText({ current: 3, best: 3 })).toBe('Streak: 3');
     expect(streakText({ current: 2, best: 9 })).toBe('Streak: 2 · Best: 9');
     expect(streakText({ current: 0, best: 0 })).toBe('Streak: 0');
+  });
+});
+
+describe('recordText', () => {
+  it('gives the fewest blocks anyone has submitted', () => {
+    expect(recordText({ blocks: 8, underPar: false })).toBe('Community best: 8 blocks');
+    expect(recordText({ blocks: 1, underPar: false })).toBe('Community best: 1 block');
+  });
+
+  it('marks a record that beats par', () => {
+    expect(recordText({ blocks: 6, underPar: true })).toBe('Community best: 6 blocks (under par)');
   });
 });
 

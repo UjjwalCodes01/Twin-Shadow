@@ -24,6 +24,8 @@ export const attachInput = (
   const placementFor = (pick: Pick): string => (pick.kind === 'floor' ? pick.key : pick.neighbour);
 
   const tap = (x: number, y: number): void => {
+    // Someone else's sculpture is on the board: taps change nothing.
+    if (store.getState().viewing) return;
     const pick = scene.pick(x, y);
     if (!pick) return;
     if (store.getState().mode === 'remove') {
@@ -39,7 +41,7 @@ export const attachInput = (
 
   // Desktop only: a faint cube where a tap would place a block.
   const updateGhost = (): void => {
-    if (!mouse || scene.isRotating() || store.getState().mode !== 'add') {
+    if (!mouse || scene.isRotating() || store.getState().mode !== 'add' || store.getState().viewing) {
       scene.setGhost(null);
       return;
     }

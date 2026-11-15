@@ -159,7 +159,12 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     });
   });
 
-  const renderSubmit = (blocks: ReadonlySet<string>, solved: boolean): void => {
+  const renderSubmit = (blocks: ReadonlySet<string>, solved: boolean, viewing: boolean): void => {
+    // While someone else's sculpture is on the board there is nothing to submit or rate.
+    if (viewing) {
+      for (const part of [starsLine, submitButton, submitNote, resultButton]) part.hidden = true;
+      return;
+    }
     // Live rating for the sculpture on the board, until a result is recorded.
     starsLine.hidden = !solved || submission !== null;
     if (solved) {
@@ -193,7 +198,7 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
   };
 
   const render = (state: GameState): void => {
-    const { blocks, mode, undoStack } = state;
+    const { blocks, mode, undoStack, viewing } = state;
     paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget));
     paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget));
 
@@ -203,13 +208,16 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     floatingWarning.hidden = floating === 0;
     floatingWarning.textContent = `${floating} floating`;
 
-    renderSubmit(blocks, isSolved(blocks, puzzle));
+    renderSubmit(blocks, isSolved(blocks, puzzle), viewing);
 
     addButton.setAttribute('aria-pressed', String(mode === 'add'));
     removeButton.setAttribute('aria-pressed', String(mode === 'remove'));
-    undoButton.disabled = undoStack.length === 0;
-    resetButton.disabled = blocks.size === 0;
-    if (blocks.size === 0) disarmReset();
+    // A viewed sculpture is read-only: every editing control is off, rotate stays on.
+    addButton.disabled = viewing;
+    removeButton.disabled = viewing;
+    undoButton.disabled = viewing || undoStack.length === 0;
+    resetButton.disabled = viewing || blocks.size === 0;
+    if (viewing || blocks.size === 0) disarmReset();
   };
 
   const unsubscribe = store.subscribe(render);

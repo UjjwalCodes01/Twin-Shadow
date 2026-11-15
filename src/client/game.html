@@ -34,6 +34,16 @@
       </section>
     </header>
 
+    <aside class="viewing" id="viewing" aria-live="polite" hidden>
+      <p class="viewing-owner" id="viewing-owner"></p>
+      <p class="viewing-detail" id="viewing-detail"></p>
+      <div class="viewing-actions">
+        <button id="viewing-prev" type="button" aria-label="Previous sculpture">&lsaquo; Prev</button>
+        <button id="viewing-back" type="button">Back to mine</button>
+        <button id="viewing-next" type="button" aria-label="Next sculpture">Next &rsaquo;</button>
+      </div>
+    </aside>
+
     <main class="stage" id="stage">
       <div class="notice" id="notice" role="status">
         <p id="notice-text">Loading puzzle&hellip;</p>
@@ -75,9 +85,25 @@
           <p class="result-rank" id="result-rank"></p>
           <p class="result-line" id="result-rarity"></p>
           <p class="result-line" id="result-streak"></p>
+          <p class="result-line" id="result-record"></p>
           <ol class="result-list" id="result-list" aria-label="Fewest blocks"></ol>
         </div>
-        <button class="result-close" id="result-close" type="button">Back to the board</button>
+        <button class="card-button" id="result-gallery" type="button">See other sculptures</button>
+        <button class="card-button secondary" id="result-close" type="button">Back to the board</button>
+      </section>
+    </div>
+
+    <div class="result-layer" id="gallery-layer" hidden>
+      <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="gallery-title">
+        <h2 class="result-title" id="gallery-title">Other sculptures</h2>
+        <div class="gallery-sort" role="group" aria-label="Order">
+          <button id="gallery-rarest" type="button" aria-pressed="true">Rarest</button>
+          <button id="gallery-leanest" type="button" aria-pressed="false">Leanest</button>
+        </div>
+        <p class="result-status" id="gallery-status" role="status" hidden></p>
+        <button class="result-retry" id="gallery-retry" type="button" hidden>Retry</button>
+        <ul class="result-list gallery-list" id="gallery-list" aria-label="Sculptures"></ul>
+        <button class="card-button secondary" id="gallery-close" type="button">Back to results</button>
       </section>
     </div>
 

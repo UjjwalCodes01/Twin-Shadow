@@ -35,6 +35,10 @@ export const starText = (stars: number): string => '★'.repeat(stars) + '☆'.r
 
 export const blockText = (count: number): string => `${count} ${count === 1 ? 'block' : 'blocks'}`;
 
+/** "Community best: 8 blocks", marked when someone has beaten par. */
+export const recordText = ({ blocks, underPar }: Result['record']): string =>
+  `Community best: ${blockText(blocks)}${underPar ? ' (under par)' : ''}`;
+
 // --- The card --------------------------------------------------------------------
 
 export type ResultCard = {
@@ -72,9 +76,10 @@ const rowItem = (row: LeaderboardRow): HTMLLIElement => {
 
 /**
  * Wires the result card to one game. `load` fetches the caller's result and
- * resolves to null when it cannot be had; it never throws.
+ * resolves to null when it cannot be had; it never throws. `openGallery` is
+ * the card's main next step: it runs after the card has closed.
  */
-export const createResultCard = (load: () => Promise<Result | null>): ResultCard => {
+export const createResultCard = (load: () => Promise<Result | null>, openGallery: () => void): ResultCard => {
   const layer = element('result-layer');
   const status = element('result-status');
   const body = element('result-body');
@@ -84,6 +89,8 @@ export const createResultCard = (load: () => Promise<Result | null>): ResultCard
   const rank = element('result-rank');
   const rarity = element('result-rarity');
   const streak = element('result-streak');
+  const record = element('result-record');
+  const gallery = element('result-gallery');
   const list = element('result-list');
   const retry = element('result-retry');
   const close = element('result-close');
@@ -100,6 +107,7 @@ export const createResultCard = (load: () => Promise<Result | null>): ResultCard
     rank.textContent = rankText(result);
     rarity.textContent = rarityText(result.rarity);
     streak.textContent = streakText(result.streak);
+    record.textContent = recordText(result.record);
 
     list.replaceChildren(...result.leaderboard.map(rowItem));
     if (result.own) {
@@ -145,6 +153,14 @@ export const createResultCard = (load: () => Promise<Result | null>): ResultCard
 
   retry.addEventListener('click', refresh, { signal: listeners.signal });
   close.addEventListener('click', hide, { signal: listeners.signal });
+  gallery.addEventListener(
+    'click',
+    () => {
+      hide();
+      openGallery();
+    },
+    { signal: listeners.signal }
+  );
 
   return {
     open: () => {

@@ -1,22 +1,27 @@
 import {
   parseDebugPuzzleResponse,
+  parseGalleryResponse,
   parsePuzzleResponse,
   parseResultResponse,
   parseSubmitResponse,
+  type Gallery,
+  type GallerySort,
   type Result,
   type Submission,
 } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { DEBUG_STATES, debugSetup } from './debug';
+import { createGallery, type GalleryHandle } from './gallery';
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
-import { createResultCard } from './result';
+import { createResultCard, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
 
 const PUZZLE_URL = '/api/puzzle';
 const SUBMIT_URL = '/api/submit';
 const RESULT_URL = '/api/result';
+const GALLERY_URL = '/api/gallery';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type Game = { store: Store; scene: SceneHandle; stop: () => void };
@@ -93,6 +98,22 @@ const loadResult = async (): Promise<Result | null> => {
   }
 };
 
+/** Fetches one page of this post's gallery. Like the result, only a player who has submitted gets it. */
+const loadGallery = async (sort: GallerySort, page: number): Promise<Gallery | null> => {
+  const url = `${GALLERY_URL}?sort=${sort}&page=${page}`;
+  try {
+    const response = await fetch(url);
+    const body: unknown = await response.json();
+    const parsed = parseGalleryResponse(body);
+    if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status !== 'ok') throw new Error(parsed.message);
+    return parsed.gallery;
+  } catch (error) {
+    console.error(`Could not load ${url}:`, error);
+    return null;
+  }
+};
+
 let game: Game | null = null;
 
 /** Starts a game on a fresh canvas, replacing any game already running. */
@@ -105,12 +126,19 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   const store = createStore(puzzle.size, options.blocks ?? []);
   if (options.rotation) store.rotate(options.rotation);
   const scene = createScene(canvas, puzzle, store);
-  const card = options.results ? createResultCard(loadResult) : null;
+  // The result card and the gallery lead to each other, so each gets a way
+  // to open the other. A debug puzzle has neither.
+  let card: ResultCard | null = null;
+  let gallery: GalleryHandle | null = null;
+  if (options.results) {
+    gallery = createGallery(store, { load: loadGallery, backToResult: () => card?.open() });
+    card = createResultCard(loadResult, () => gallery?.open());
+  }
   const removeHud = createHud(puzzle, store, {
     submission: options.submission ?? null,
     submitBlocked: options.submitBlocked ?? null,
     submit: submitSculpture,
-    openResult: card ? () => card.open() : null,
+    openResult: card ? () => card?.open() : null,
   });
   attachInput(canvas, puzzle, store, scene);
 
@@ -119,6 +147,7 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
     scene,
     stop: () => {
       removeHud();
+      gallery?.dispose();
       card?.dispose();
       scene.dispose();
       canvas.remove();

@@ -107,4 +107,76 @@ describe('store', () => {
     store.undo();
     expect(calls).toBe(3);
   });
+
+  describe('viewing another sculpture', () => {
+    const theirs = ['2,0,2', '2,1,2'];
+    const build = () => {
+      const store = createStore(size);
+      store.add('0,0,0');
+      store.add('0,1,0');
+      store.remove('0,0,0');
+      return store;
+    };
+
+    it('shows the other sculpture and marks the board as viewing', () => {
+      const store = build();
+      store.view(theirs);
+      expect(blocksOf(store)).toEqual([...theirs].sort());
+      expect(store.getState().viewing).toBe(true);
+      expect(store.getState().undoStack).toEqual([]);
+    });
+
+    it('blocks add, remove, undo and reset', () => {
+      const store = build();
+      store.view(theirs);
+      const shown = store.getState();
+      expect(store.add('1,0,0')).toBe(false);
+      expect(store.remove('2,0,2')).toBe(false);
+      store.undo();
+      store.reset();
+      expect(store.getState()).toBe(shown);
+    });
+
+    it('still rotates, and keeps the rotation on leaving', () => {
+      const store = build();
+      store.view(theirs);
+      store.rotate(1);
+      expect(store.getState().rotation).toBe(1);
+      store.endView();
+      expect(store.getState().rotation).toBe(1);
+    });
+
+    it('restores the player`s own blocks and undo stack exactly on leaving', () => {
+      const store = build();
+      const before = store.getState();
+      store.view(theirs);
+      store.endView();
+      const after = store.getState();
+      expect(after.viewing).toBe(false);
+      expect(after.blocks).toBe(before.blocks);
+      expect(after.undoStack).toBe(before.undoStack);
+      // Undo works again and steps back through the player's own moves.
+      store.undo();
+      expect(blocksOf(store)).toEqual(['0,0,0', '0,1,0']);
+    });
+
+    it('keeps the player`s own board while stepping between viewed sculptures', () => {
+      const store = build();
+      const before = store.getState();
+      store.view(theirs);
+      store.view(['1,0,1']);
+      store.view(['0,0,2', '1,0,2']);
+      expect(blocksOf(store)).toEqual(['0,0,2', '1,0,2']);
+      store.endView();
+      expect(store.getState().blocks).toBe(before.blocks);
+      expect(store.getState().undoStack).toBe(before.undoStack);
+    });
+
+    it('does nothing when asked to leave while not viewing', () => {
+      const store = build();
+      const before = store.getState();
+      store.endView();
+      expect(store.getState()).toBe(before);
+    });
+  });
 });
