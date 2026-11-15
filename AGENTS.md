@@ -12,15 +12,15 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
 
 ## Layout
 
-- `src/shared/`: code used by both sides. `puzzle.ts` (types and the test puzzle), `logic.ts` (the game rules), `score.ts` (stars and the canonical sculpture form), `api.ts` (request and response types and validation), `random.ts` (seeded random numbers).
+- `src/shared/`: code used by both sides. `puzzle.ts` (types, the weekday-to-tier table and the test puzzle), `logic.ts` (the game rules), `score.ts` (stars and the canonical sculpture form), `api.ts` (request and response types and validation), `random.ts` (seeded random numbers).
 - `src/client/`: runs in an iframe on reddit.com.
   - `splash.html` / `splash.ts`: the inline view shown in the feed. Keep it light; no three.js here.
   - `game.html` / `game.ts`: the expanded view. Loads the puzzle and wires the parts together.
   - `store.ts`: the one game state store (blocks, rotation, mode, undo stack). No DOM.
   - `scene.ts`: the three.js board. Reads the store, never writes game state.
-  - `input.ts`: tap handling. `hud.ts`: the HTML panels and controls.
+  - `input.ts`: tap handling. `hud.ts`: the HTML panels and controls. `result.ts`: the result card and its wording.
   - `debug.ts`: temporary debug board states.
-- `src/server/`: `routes/api.ts` (public `/api` routes: `GET /api/puzzle`, `POST /api/submit`), `routes/menu.ts`, `routes/triggers.ts` and `routes/scheduler.ts` (the three ways a post is made), `core/posts.ts` (post creation and the daily job), `core/submissions.ts`, `core/keys.ts` (every Redis key, documented), `core/queue.ts`, `data/puzzles.json` (generated puzzle queue), `testing/fakeDevvit.ts` (stand-ins for Redis, Reddit and context in tests).
+- `src/server/`: `routes/api.ts` (public `/api` routes: `GET /api/puzzle`, `POST /api/submit`, `GET /api/result`), `routes/menu.ts`, `routes/triggers.ts` and `routes/scheduler.ts` (the three ways a post is made), `core/posts.ts` (post creation, each post's saved record and the daily job), `core/submissions.ts` (the one stored submission per player per post), `core/scores.ts` (leaderboard, rarity, streaks and the result), `core/keys.ts` (every Redis key, documented), `core/queue.ts`, `data/puzzles.json` (generated puzzle queue), `testing/` (stand-ins for Redis, Reddit and context, and known solutions, for tests only).
 - `src/generator/`: the offline puzzle generator. Runs on a developer machine with `npm run generate`, never on the server. `data/solutions.json` holds seed sculptures and par solutions.
 - `tools/`: TypeScript project configs and `generate.mjs`, the generator runner.
 - `devvit.json`: app config: entry points, the menu item, the install trigger, the hourly `daily-post` task.
@@ -32,7 +32,11 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
 - **Validate before trusting**: anything fetched from the server goes through the `parse...` functions in `src/shared/api.ts` before use, and the server does the same with request bodies.
 - **The server decides scores.** A submission is a list of blocks; the server runs `isSolved` on it and counts the blocks itself. Never accept a solved flag, block count or star rating from the client.
 - **`parIsOptimal` never leaves the server.** Players get `Puzzle`; `QueuedPuzzle` is for the generator and the server's queue only.
-- **Posts are made in one place**: `createNextPost` in `src/server/core/posts.ts`. Each post is tied to one puzzle number for good.
+- **Posts are made in one place**: `createNextPost` in `src/server/core/posts.ts`. Titles count posts ("Twin Shadows #N"); the puzzle comes from the tier for the UTC weekday, set in `WEEKDAY_TIERS` in `src/shared/puzzle.ts`.
+- **Each post keeps its own copy of its puzzle**, saved in Redis when the post is created. Routes read that copy with `loadPost`, never the queue file, so regenerating the queue cannot change an existing post.
+- **Daily posts and extra posts**: the scheduled job and the install trigger make the one `daily` post per UTC date, through `createDailyPost`. The moderator menu makes `manual` extras. Only daily posts count towards streaks.
+- **Scores change once per player per post.** Submissions go through `acceptSubmission` in `src/server/core/scores.ts`, which updates the leaderboard, rarity counts and streak only for the request that won the first-submission write.
+- **Results are for players who have submitted.** `GET /api/result` refuses everyone else, and never sends another player's sculpture.
 - **New Redis keys go in `src/server/core/keys.ts`** with a comment saying what they hold.
 - Every server route the client calls must start with `/api/`. Menu and trigger routes are under `/internal/` and must be registered in `devvit.json`.
 - Coordinates: x runs left to right, y runs up from the floor, z runs front to back, all from 0. A sculpture is a `Set<string>` of `"x,y,z"` keys. Silhouettes are string arrays, top row first, `#` lit and `.` empty.

@@ -13,7 +13,8 @@ import {
 } from '../shared/logic';
 import type { Submission } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
-import { sortBlocks, starsFor, type Stars } from '../shared/score';
+import { sortBlocks, starsFor } from '../shared/score';
+import { blockText, starText } from './result';
 import type { GameState, Store } from './store';
 
 export type SubmitOutcome = { ok: true; submission: Submission } | { ok: false; message: string };
@@ -25,6 +26,8 @@ export type HudOptions = {
   submitBlocked: string | null;
   /** Sends the sculpture to the server. Never throws. */
   submit: (blocks: string[]) => Promise<SubmitOutcome>;
+  /** Opens the result card, or null for a game that has no results (a debug puzzle). */
+  openResult: (() => void) | null;
 };
 
 /** Longest side of a silhouette panel, in CSS px. */
@@ -73,10 +76,6 @@ const buildPanel = (id: string, columns: number, rows: number): Panel => {
   return { root, cells };
 };
 
-const starText = (stars: Stars): string => '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars);
-
-const blockText = (count: number): string => `${count} ${count === 1 ? 'block' : 'blocks'}`;
-
 const paintPanel = (panel: Panel, states: CellState[][]): void => {
   panel.cells.forEach((row, y) => {
     row.forEach((cell, column) => {
@@ -100,7 +99,7 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
   const starsLine = element('stars');
   const submitButton = button('submit');
   const submitNote = element('submit-note');
-  const resultLine = element('result');
+  const resultButton = button('result-open');
   const addButton = button('mode-add');
   const removeButton = button('mode-remove');
   const undoButton = button('undo');
@@ -116,6 +115,7 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
   onClick(button('rotate-left'), () => store.rotate(1));
   onClick(button('rotate-right'), () => store.rotate(-1));
   onClick(undoButton, () => store.undo());
+  onClick(resultButton, () => options.openResult?.());
 
   // Reset needs a second tap within a few seconds.
   let resetTimer = 0;
@@ -153,7 +153,9 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
       if (outcome.ok) submission = outcome.submission;
       else failure = outcome.message;
       // The game may have been replaced while the request was in flight.
-      if (!listeners.signal.aborted) render(store.getState());
+      if (listeners.signal.aborted) return;
+      render(store.getState());
+      if (outcome.ok) options.openResult?.();
     });
   });
 
@@ -179,9 +181,14 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     submitNote.textContent = note ?? '';
     submitNote.classList.toggle('failed', options.submitBlocked === null && failure !== null);
 
-    resultLine.hidden = submission === null;
+    // Once submitted, a small button brings the result card back.
+    resultButton.hidden = submission === null || options.openResult === null;
     if (submission) {
-      resultLine.textContent = `Submitted: ${blockText(submission.blocks)}, par ${submission.par} ${starText(submission.stars)}`;
+      resultButton.textContent = `Results ${starText(submission.stars)}`;
+      resultButton.setAttribute(
+        'aria-label',
+        `Results: ${blockText(submission.blocks)}, par ${submission.par}, ${submission.stars} of 3 stars`
+      );
     }
   };
 

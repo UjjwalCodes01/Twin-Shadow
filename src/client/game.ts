@@ -1,18 +1,22 @@
 import {
   parseDebugPuzzleResponse,
   parsePuzzleResponse,
+  parseResultResponse,
   parseSubmitResponse,
+  type Result,
   type Submission,
 } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { DEBUG_STATES, debugSetup } from './debug';
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
+import { createResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
 
 const PUZZLE_URL = '/api/puzzle';
 const SUBMIT_URL = '/api/submit';
+const RESULT_URL = '/api/result';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type Game = { store: Store; scene: SceneHandle; stop: () => void };
@@ -24,6 +28,8 @@ type GameOptions = {
   submission?: Submission | null;
   /** Why Submit is off for this game, or null when it is allowed. */
   submitBlocked?: string | null;
+  /** True for the post's own puzzle, which has results. A debug puzzle has none. */
+  results?: boolean;
 };
 
 const element = (id: string): HTMLElement => {
@@ -69,6 +75,24 @@ const submitSculpture = async (blocks: string[]): Promise<SubmitOutcome> => {
   }
 };
 
+/**
+ * Fetches the caller's result for this post. The server only answers a player
+ * who has submitted. Any failure becomes null, and the card offers a retry.
+ */
+const loadResult = async (): Promise<Result | null> => {
+  try {
+    const response = await fetch(RESULT_URL);
+    const body: unknown = await response.json();
+    const parsed = parseResultResponse(body);
+    if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status !== 'ok') throw new Error(parsed.message);
+    return parsed.result;
+  } catch (error) {
+    console.error(`Could not load ${RESULT_URL}:`, error);
+    return null;
+  }
+};
+
 let game: Game | null = null;
 
 /** Starts a game on a fresh canvas, replacing any game already running. */
@@ -81,10 +105,12 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   const store = createStore(puzzle.size, options.blocks ?? []);
   if (options.rotation) store.rotate(options.rotation);
   const scene = createScene(canvas, puzzle, store);
+  const card = options.results ? createResultCard(loadResult) : null;
   const removeHud = createHud(puzzle, store, {
     submission: options.submission ?? null,
     submitBlocked: options.submitBlocked ?? null,
     submit: submitSculpture,
+    openResult: card ? () => card.open() : null,
   });
   attachInput(canvas, puzzle, store, scene);
 
@@ -93,11 +119,14 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
     scene,
     stop: () => {
       removeHud();
+      card?.dispose();
       scene.dispose();
       canvas.remove();
     },
   };
   setLoadState('ready');
+  // A player who already submitted comes back to their result.
+  if (card && options.submission) card.open();
 };
 
 // --- TEMPORARY debug states -------------------------------------------------
@@ -186,6 +215,7 @@ async function loadPostPuzzle(): Promise<void> {
       blocks: submission?.sculpture ?? [],
       submission,
       submitBlocked: canSubmit ? null : 'Log in to submit',
+      results: true,
     });
     if (debug) showDebugBar();
   } catch (error) {

@@ -1,5 +1,5 @@
-// Debug board states, reachable only with ?debug=1 in the URL.
-//   ?debug=1&state=empty|solution|broken|big&rot=0..3
+// TEMPORARY debug board states, offered in the app's dev subreddit and, for a
+// local build, with ?debug=1&state=empty|solution|broken|big&rot=0..3
 
 import { canPlace, formatSilhouette, parseKey, projectFront, projectSide, toKey } from '../shared/logic';
 import { TEST_PUZZLE, TEST_SOLUTION, type Puzzle, type Size } from '../shared/puzzle';
