@@ -465,6 +465,78 @@ body:not([data-state='ready']) .controls {
   touch-action: manipulation;
 }
 
+/* The result card's buttons: the main one, then two quieter ones side by side. */
+.card-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-row {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+.card-row .card-button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 6px;
+}
+
+.card-button:disabled {
+  border-color: var(--line);
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+/* The one-time "Join the community" prompt, under the leaderboard. */
+.result-join {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+}
+
+.result-join-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  line-height: 1.25;
+}
+
+.join-button {
+  flex: none;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.join-button.secondary {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.join-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* The quieter of two buttons, and Retry. */
 .card-button.secondary,
 .result-retry {
@@ -741,6 +813,27 @@ body:not([data-state='ready']) .controls {
 
   .result-stars {
     font-size: 1.4rem;
+  }
+
+  /* All three buttons on one line, which leaves room for the join prompt. */
+  .card-actions {
+    flex-direction: row;
+  }
+
+  .card-actions > .card-button {
+    flex: 3 1 0;
+    min-height: 44px;
+    padding: 0 8px;
+    font-size: 0.95rem;
+  }
+
+  .card-row {
+    flex: 5 1 0;
+  }
+
+  .result-join {
+    margin-top: 4px;
+    padding: 2px 4px 2px 10px;
   }
 
 

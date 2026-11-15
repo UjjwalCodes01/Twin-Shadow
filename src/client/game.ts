@@ -1,11 +1,15 @@
+import { canRunAsUser } from '@devvit/web/client';
 import {
   parseDebugPuzzleResponse,
   parseGalleryResponse,
+  parseJoinResponse,
   parsePuzzleResponse,
   parseResultResponse,
+  parseShareResponse,
   parseSubmitResponse,
   type Gallery,
   type GallerySort,
+  type JoinChoice,
   type Result,
   type Submission,
 } from '../shared/api';
@@ -14,7 +18,7 @@ import { DEBUG_STATES, debugSetup } from './debug';
 import { createGallery, type GalleryHandle } from './gallery';
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
-import { createResultCard, type ResultCard } from './result';
+import { createResultCard, type ActionOutcome, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
 
@@ -22,6 +26,8 @@ const PUZZLE_URL = '/api/puzzle';
 const SUBMIT_URL = '/api/submit';
 const RESULT_URL = '/api/result';
 const GALLERY_URL = '/api/gallery';
+const SHARE_URL = '/api/share';
+const JOIN_URL = '/api/join';
 
 /** 'missing' is a post with no puzzle saved for it: asking again cannot help, so there is no Retry. */
 type LoadState = 'loading' | 'ready' | 'error' | 'missing';
@@ -121,6 +127,56 @@ const loadGallery = async (sort: GallerySort, page: number): Promise<Gallery | n
   }
 };
 
+/**
+ * Asks Reddit whether the app may act as the player, which shows Reddit's own
+ * permission prompt the first time. It needs the player's real tap. Anything
+ * but a clear yes counts as no, so nothing is ever done as the player without it.
+ */
+const playerAllows = async (tap: Event): Promise<boolean> => {
+  try {
+    return await canRunAsUser(tap);
+  } catch (error) {
+    console.error('Could not ask for permission to act as the player:', error);
+    return false;
+  }
+};
+
+/** Posts the player's result as a comment on the post, after their tap on Share and Reddit's permission. */
+const shareResult = async (tap: Event): Promise<ActionOutcome> => {
+  if (!(await playerAllows(tap))) return 'declined';
+  try {
+    const response = await fetch(SHARE_URL, { method: 'POST' });
+    const body: unknown = await response.json();
+    const parsed = parseShareResponse(body);
+    if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status === 'not-submitted' || parsed.status === 'failed') throw new Error(parsed.message);
+    return 'done';
+  } catch (error) {
+    console.error(`Could not share through ${SHARE_URL}:`, error);
+    return 'failed';
+  }
+};
+
+/** Sends the player's answer to the join prompt. Joining acts as the player, so it asks permission first. */
+const answerJoin = async (choice: JoinChoice, tap: Event): Promise<ActionOutcome> => {
+  if (choice === 'join' && !(await playerAllows(tap))) return 'declined';
+  try {
+    const response = await fetch(JOIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choice }),
+    });
+    const body: unknown = await response.json();
+    const parsed = parseJoinResponse(body);
+    if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status !== 'ok') throw new Error(parsed.message);
+    return 'done';
+  } catch (error) {
+    console.error(`Could not send the answer to ${JOIN_URL}:`, error);
+    return 'failed';
+  }
+};
+
 let game: Game | null = null;
 
 /** Starts a game on a fresh canvas, replacing any game already running. */
@@ -139,7 +195,7 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   let gallery: GalleryHandle | null = null;
   if (options.results) {
     gallery = createGallery(store, { load: loadGallery, backToResult: () => card?.open() });
-    card = createResultCard(loadResult, () => gallery?.open());
+    card = createResultCard({ load: loadResult, openGallery: () => gallery?.open(), share: shareResult, answerJoin });
   }
   const removeHud = createHud(puzzle, store, {
     submission: options.submission ?? null,

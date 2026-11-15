@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { blockText, ordinal, rankText, rarityText, recordText, starText, streakText } from './result';
+import {
+  blockText,
+  canShare,
+  ordinal,
+  rankText,
+  rarityText,
+  recordText,
+  shareButtonText,
+  starText,
+  streakText,
+} from './result';
 
 describe('ordinal', () => {
   it('uses st, nd, rd and th', () => {
@@ -69,5 +79,21 @@ describe('small labels', () => {
   it('counts blocks in the singular and plural', () => {
     expect(blockText(1)).toBe('1 block');
     expect(blockText(9)).toBe('9 blocks');
+  });
+});
+
+describe('the Share button', () => {
+  it('reads differently in each state', () => {
+    expect(shareButtonText('ready')).toBe('Share result');
+    expect(shareButtonText('sharing')).toBe('Sharing\u2026');
+    expect(shareButtonText('shared')).toBe('Shared \u2713');
+    expect(shareButtonText('failed')).toBe('Retry share');
+  });
+
+  it('can be tapped only before sharing or after a failure', () => {
+    expect(canShare('ready')).toBe(true);
+    expect(canShare('failed')).toBe(true);
+    expect(canShare('sharing')).toBe(false);
+    expect(canShare('shared')).toBe(false);
   });
 });

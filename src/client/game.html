@@ -87,9 +87,19 @@
           <p class="result-line" id="result-streak"></p>
           <p class="result-line" id="result-record"></p>
           <ol class="result-list" id="result-list" aria-label="Fewest blocks"></ol>
+          <div class="result-join" id="result-join" hidden>
+            <p class="result-join-text" id="result-join-text" role="status"></p>
+            <button class="join-button" id="result-join-yes" type="button">Join</button>
+            <button class="join-button secondary" id="result-join-no" type="button">No thanks</button>
+          </div>
         </div>
-        <button class="card-button" id="result-gallery" type="button">See other sculptures</button>
-        <button class="card-button secondary" id="result-close" type="button">Back to the board</button>
+        <div class="card-actions">
+          <button class="card-button" id="result-gallery" type="button">See other sculptures</button>
+          <div class="card-row">
+            <button class="card-button secondary" id="result-share" type="button" hidden>Share result</button>
+            <button class="card-button secondary" id="result-close" type="button">Back to the board</button>
+          </div>
+        </div>
       </section>
     </div>
 

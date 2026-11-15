@@ -18,6 +18,8 @@ This is an early prototype. A new puzzle is posted each day from a generated que
 - Stars: three at or under par, two within three blocks of par, one for any other solve.
 - After you submit, a result card shows your rank (fewest blocks first, and equal counts share a rank), the leaderboard, and whether anyone else built exactly the same sculpture. **Results** in the top bar opens it again.
 - **See other sculptures** on the result card lists every different sculpture players submitted, rarest or leanest first. Tap one to see it on the board; you can rotate it but not change it, and **Back to mine** returns your own board. The list only opens once you have submitted.
+- **Share result** on the result card posts your result as a comment on the puzzle's post: the post number, your blocks, par, stars and how common your sculpture is, never the sculpture itself. It posts only when you tap it, once per puzzle, and Reddit asks your permission the first time.
+- The first result card offers **Join** to follow the community for the daily puzzle. Joining or choosing **No thanks** settles it; you are not asked again.
 - Your streak counts daily puzzles solved in a row, each on the day it was the newest. Solving an older puzzle never changes it. A best streak of 3, 7 or 30 days earns a flair in the community.
 
 ## Development
@@ -43,7 +45,7 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | --- | --- |
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
 | `src/client/` | The three.js board, tap input and the HTML controls |
-| `src/server/` | The Hono server: the puzzle, submit, result and gallery endpoints, post creation, the daily job, leaderboards, streaks and flair |
+| `src/server/` | The Hono server: the puzzle, submit, result, gallery, share and join endpoints, post creation, the daily job, leaderboards, streaks and flair |
 | `src/generator/` | The offline puzzle generator, run with `npm run generate` |
 | `devvit.json` | App configuration: entry points, menu item, install trigger and the scheduled task |
 

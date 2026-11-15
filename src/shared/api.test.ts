@@ -3,9 +3,12 @@ import {
   MAX_BOARD_EDGE,
   isGallerySort,
   parseGalleryResponse,
+  parseJoinRequest,
+  parseJoinResponse,
   parsePuzzle,
   parsePuzzleResponse,
   parseResultResponse,
+  parseShareResponse,
   parseSubmitRequest,
   parseSubmitResponse,
 } from './api';
@@ -210,6 +213,8 @@ describe('parseResultResponse', () => {
     record: { blocks: 7, underPar: false },
     rarity: { same: 4, share: 0.1, smallSample: false },
     streak: { current: 2, best: 5 },
+    shared: false,
+    joinPrompt: true,
   };
   const ok = (changes: Record<string, unknown>): unknown => ({ status: 'ok', result: { ...result, ...changes } });
 
@@ -246,6 +251,10 @@ describe('parseResultResponse', () => {
       { rarity: { same: 4, share: 0.1 } },
       { streak: { current: -1, best: 5 } },
       { streak: undefined },
+      { shared: 'yes' },
+      { shared: undefined },
+      { joinPrompt: 1 },
+      { joinPrompt: undefined },
     ];
     for (const changes of bad) expect(parseResultResponse(ok(changes)), JSON.stringify(changes)).toBeNull();
   });
@@ -309,5 +318,42 @@ describe('parseGalleryResponse', () => {
     expect(isGallerySort('leanest')).toBe(true);
     expect(isGallerySort('newest')).toBe(false);
     expect(isGallerySort(undefined)).toBe(false);
+  });
+});
+
+describe('parseShareResponse', () => {
+  it('accepts each answer the server gives', () => {
+    expect(parseShareResponse({ status: 'shared' })).toEqual({ status: 'shared' });
+    expect(parseShareResponse({ status: 'already-shared', extra: 1 })).toEqual({ status: 'already-shared' });
+    const failed = { status: 'failed', message: "Couldn't share your result. Try again." };
+    expect(parseShareResponse(failed)).toEqual(failed);
+    const refused = { status: 'not-submitted', message: 'Submit your solution to see the results.' };
+    expect(parseShareResponse(refused)).toEqual(refused);
+  });
+
+  it('rejects other bodies', () => {
+    expect(parseShareResponse({ status: 'failed' })).toBeNull();
+    expect(parseShareResponse({ status: 'ok' })).toBeNull();
+    expect(parseShareResponse(null)).toBeNull();
+  });
+});
+
+describe('parseJoinRequest and parseJoinResponse', () => {
+  it('accepts the two answers a player can give', () => {
+    expect(parseJoinRequest({ choice: 'join' })).toEqual({ choice: 'join' });
+    expect(parseJoinRequest({ choice: 'dismiss', userId: 't2_someone' })).toEqual({ choice: 'dismiss' });
+  });
+
+  it('rejects any other request', () => {
+    for (const body of [{ choice: 'maybe' }, { choice: true }, {}, null, 'join']) {
+      expect(parseJoinRequest(body), JSON.stringify(body)).toBeNull();
+    }
+  });
+
+  it('reads the server`s reply', () => {
+    expect(parseJoinResponse({ status: 'ok' })).toEqual({ status: 'ok' });
+    expect(parseJoinResponse({ status: 'failed', message: 'x' })).toEqual({ status: 'failed', message: 'x' });
+    expect(parseJoinResponse({ status: 'failed' })).toBeNull();
+    expect(parseJoinResponse(undefined)).toBeNull();
   });
 });

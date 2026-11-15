@@ -3,17 +3,20 @@ import { context, reddit } from '@devvit/web/server';
 import type {
   DebugPuzzleResponse,
   GalleryResponse,
+  JoinResponse,
   PuzzleResponse,
   ResultResponse,
+  ShareResponse,
   SubmitRejection,
   SubmitResponse,
 } from '../../shared/api';
-import { isGallerySort, parseSubmitRequest } from '../../shared/api';
+import { isGallerySort, parseJoinRequest, parseSubmitRequest } from '../../shared/api';
 import { isSolved } from '../../shared/logic';
 import { isDevSubreddit } from '../core/dev';
 import { loadPost, type PostRecord } from '../core/posts';
 import { QUEUE, puzzleByNumber } from '../core/queue';
 import { acceptSubmission, buildGallery, buildResult } from '../core/scores';
+import { answerJoinPrompt, shareResult } from '../core/share';
 import { getStored, getSubmission } from '../core/submissions';
 
 // Mounted at /api in index.ts, so every route here starts with /api/.
@@ -111,6 +114,37 @@ api.get('/gallery', async (c) => {
   const sort = c.req.query('sort');
   const gallery = await buildGallery(stored, isGallerySort(sort) ? sort : 'rarest', Number(c.req.query('page')));
   return c.json<GalleryResponse>({ status: 'ok', gallery });
+});
+
+// Posts the caller's result as a comment on the post. The client calls this
+// only from the player's own tap on Share, after Reddit's consent check. Like
+// the result itself, it is only for a player who has submitted.
+api.post('/share', async (c) => {
+  const { userId } = context;
+  const current = await currentPost();
+  if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  const stored = userId ? await getStored(current.postId, userId) : null;
+  if (!stored) return c.json<ShareResponse>(NOT_SUBMITTED, 403);
+  const outcome = await shareResult(current.postId, current.post, stored);
+  if (outcome === 'failed') {
+    return c.json<ShareResponse>({ status: 'failed', message: "Couldn't share your result. Try again." }, 502);
+  }
+  return c.json<ShareResponse>({ status: outcome });
+});
+
+// Records the caller's answer to the "Join the community" prompt, and for
+// 'join' subscribes them to this subreddit. Called only from the player's
+// own tap on one of the prompt's two buttons.
+api.post('/join', async (c) => {
+  const { userId } = context;
+  if (!userId) return c.json<JoinResponse>({ status: 'failed', message: 'Log in to join.' }, 401);
+  const body: unknown = await c.req.json().catch(() => null);
+  const request = parseJoinRequest(body);
+  if (!request) return c.json<JoinResponse>({ status: 'failed', message: 'That answer could not be read.' }, 400);
+  if (!(await answerJoinPrompt(userId, request.choice))) {
+    return c.json<JoinResponse>({ status: 'failed', message: "Couldn't join. Try again." }, 502);
+  }
+  return c.json<JoinResponse>({ status: 'ok' });
 });
 
 // TEMPORARY: lets the dev subreddit play any puzzle in the queue. Anywhere

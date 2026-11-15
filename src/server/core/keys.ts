@@ -78,4 +78,17 @@ export const KEYS = {
    * daily post counted and the streak flair they have been given.
    */
   streaks: 'streaks',
+
+  /**
+   * Hash, user id -> the id of the comment that shared the player's result
+   * for a post. Holds 'pending' while the comment is being posted. A player
+   * with a field here has used their one share for that post.
+   */
+  shares: (postId: string): string => `post:${postId}:shares`,
+
+  /**
+   * Hash, user id -> 'joined' or 'dismissed': the player's answer to the
+   * "Join the community" prompt. A player with an answer is never asked again.
+   */
+  joinPrompt: 'prompts:join',
 } as const;

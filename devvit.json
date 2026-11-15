@@ -43,6 +43,11 @@
     "build": "vite build",
     "dev": "vite build --watch"
   },
+  "permissions": {
+    "reddit": {
+      "asUser": ["SUBMIT_COMMENT", "SUBSCRIBE_TO_SUBREDDIT"]
+    }
+  },
   "dev": {
     "subreddit": "twin_shadowss_dev"
   }

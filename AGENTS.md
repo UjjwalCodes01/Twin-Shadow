@@ -12,7 +12,7 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
 
 ## Layout
 
-- `src/shared/`: code used by both sides. `puzzle.ts` (types, the weekday-to-tier table and the test puzzle), `logic.ts` (the game rules), `score.ts` (stars and the canonical sculpture form), `api.ts` (request and response types and validation), `random.ts` (seeded random numbers).
+- `src/shared/`: code used by both sides. `puzzle.ts` (types, the weekday-to-tier table and the test puzzle), `logic.ts` (the game rules), `score.ts` (stars and the canonical sculpture form), `api.ts` (request and response types and validation), `share.ts` (the wording of a shared result), `random.ts` (seeded random numbers).
 - `src/client/`: runs in an iframe on reddit.com.
   - `splash.html` / `splash.ts`: the inline view shown in the feed. Keep it light; no three.js here.
   - `game.html` / `game.ts`: the expanded view. Loads the puzzle and wires the parts together.
@@ -20,7 +20,7 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
   - `scene.ts`: the three.js board. Reads the store, never writes game state.
   - `input.ts`: tap handling. `hud.ts`: the HTML panels and controls. `result.ts`: the result card and its wording. `gallery.ts`: the list of other players' sculptures and the banner shown while viewing one.
   - `debug.ts`: temporary debug board states.
-- `src/server/`: `routes/api.ts` (public `/api` routes: `GET /api/puzzle`, `POST /api/submit`, `GET /api/result`, `GET /api/gallery`), `routes/menu.ts`, `routes/triggers.ts` and `routes/scheduler.ts` (the three ways a post is made), `core/posts.ts` (post creation, each post's saved record and the daily job), `core/submissions.ts` (the one stored submission per player per post), `core/scores.ts` (leaderboard, rarity, gallery, streaks and the result), `core/flair.ts` (streak flair), `core/keys.ts` (every Redis key, documented), `core/queue.ts`, `data/puzzles.json` (generated puzzle queue), `testing/` (stand-ins for Redis, Reddit and context, and known solutions, for tests only).
+- `src/server/`: `routes/api.ts` (public `/api` routes: `GET /api/puzzle`, `POST /api/submit`, `GET /api/result`, `GET /api/gallery`, `POST /api/share`, `POST /api/join`), `routes/menu.ts`, `routes/triggers.ts` and `routes/scheduler.ts` (the three ways a post is made), `core/posts.ts` (post creation, each post's saved record and the daily job), `core/submissions.ts` (the one stored submission per player per post), `core/scores.ts` (leaderboard, rarity, gallery, streaks and the result), `core/flair.ts` (streak flair), `core/share.ts` (sharing a result as a comment, and the join prompt), `core/keys.ts` (every Redis key, documented), `core/queue.ts`, `data/puzzles.json` (generated puzzle queue), `testing/` (stand-ins for Redis, Reddit and context, and known solutions, for tests only).
 - `src/generator/`: the offline puzzle generator. Runs on a developer machine with `npm run generate`, never on the server. `data/solutions.json` holds seed sculptures and par solutions.
 - `tools/`: TypeScript project configs and `generate.mjs`, the generator runner.
 - `devvit.json`: app config: entry points, the menu item, the install trigger, the hourly `daily-post` task.
@@ -38,6 +38,9 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
 - **Scores change once per player per post.** Submissions go through `acceptSubmission` in `src/server/core/scores.ts`. The streak changes only for the request that won the first-submission write, and each counting step (leaderboard, block-count tally, sculpture count) is claimed in Redis before it runs, so a repair can finish a half-counted submission without counting twice.
 - **Results and the gallery are for players who have submitted.** `GET /api/result` and `GET /api/gallery` refuse everyone else. Other players' sculptures are answers: only the gallery sends them, and only after the caller has submitted for that post.
 - **Viewing is read-only.** Another player's sculpture goes on the board through `store.view`, which blocks every edit and sets the player's own board aside until `store.endView`.
+- **Nothing is done as the player without their tap.** Sharing a result and joining the community act as the player (`runAs: 'USER'`, `subscribeToCurrentSubreddit`). The client calls those routes only from the player's own tap, after `canRunAsUser` has said yes; anything but a clear yes means nothing is sent. The scopes are listed in `permissions.reddit.asUser` in `devvit.json`.
+- **A shared result is spoiler-free and posted once.** The text comes from `shareText` in `src/shared/share.ts`: numbers only, never the sculpture. `shareResult` claims the share in Redis before posting, releases the claim if the comment fails, and names the player in the comment when Reddit posts it from the app's account.
+- **The join prompt is asked until answered, then never again.** `Result.joinPrompt` is true while the player has no answer stored; joining or dismissing stores one.
 - **Flair is a bonus.** `setStreakFlair` never throws, so a flair failure cannot fail a submission.
 - **New Redis keys go in `src/server/core/keys.ts`** with a comment saying what they hold.
 - Every server route the client calls must start with `/api/`. Menu and trigger routes are under `/internal/` and must be registered in `devvit.json`.

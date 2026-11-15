@@ -1,7 +1,8 @@
 // The result card shown over the board after submitting. Plain HTML; the data
 // comes fresh from the server every time the card opens.
 
-import type { LeaderboardRow, Result } from '../shared/api';
+import type { JoinChoice, LeaderboardRow, Result } from '../shared/api';
+import { rarityPercent } from '../shared/share';
 
 // --- Wording (no DOM, so it can be tested) ---------------------------------------
 
@@ -24,7 +25,7 @@ export const rankText = ({ rank, tied, solvers }: Pick<Result, 'rank' | 'tied' |
 export const rarityText = ({ same, share, smallSample }: Result['rarity']): string => {
   if (smallSample) return "You're among the first solvers";
   if (same <= 1) return 'Only you built this';
-  return `Same as ${Math.max(1, Math.round(share * 100))}% of solvers`;
+  return `Same as ${rarityPercent(share)}% of solvers`;
 };
 
 /** "Streak: 3", with the best streak added only when it is higher. */
@@ -39,7 +40,42 @@ export const blockText = (count: number): string => `${count} ${count === 1 ? 'b
 export const recordText = ({ blocks, underPar }: Result['record']): string =>
   `Community best: ${blockText(blocks)}${underPar ? ' (under par)' : ''}`;
 
+/** Where the Share button stands. */
+export type ShareState = 'ready' | 'sharing' | 'shared' | 'failed';
+
+const SHARE_BUTTON_TEXT: Record<ShareState, string> = {
+  ready: 'Share result',
+  sharing: 'Sharing\u2026',
+  shared: 'Shared \u2713',
+  failed: 'Retry share',
+};
+
+export const shareButtonText = (state: ShareState): string => SHARE_BUTTON_TEXT[state];
+
+/** The Share button can be tapped only when there is something left to do. */
+export const canShare = (state: ShareState): boolean => state === 'ready' || state === 'failed';
+
+export const JOIN_PROMPT_TEXT = 'Join the community for daily puzzles.';
+export const JOIN_FAILED_TEXT = "Couldn't join. Try again.";
+
 // --- The card --------------------------------------------------------------------
+
+/**
+ * What a tap on Share or Join came to. 'declined' means the player said no
+ * when Reddit asked for permission, so nothing was done and nothing failed.
+ */
+export type ActionOutcome = 'done' | 'declined' | 'failed';
+
+export type ResultCardOptions = {
+  /** Fetches the caller's result. Resolves to null when it cannot be had; never throws. */
+  load: () => Promise<Result | null>;
+  /** The card's main next step. It runs after the card has closed. */
+  openGallery: () => void;
+  /** Posts the result as a comment. Gets the tap itself, which Reddit's permission check needs. Never throws. */
+  share: (tap: Event) => Promise<ActionOutcome>;
+  /** Sends the player's answer to the join prompt. Never throws. */
+  answerJoin: (choice: JoinChoice, tap: Event) => Promise<ActionOutcome>;
+};
 
 export type ResultCard = {
   /** Shows the card and loads fresh data into it. */
@@ -52,6 +88,12 @@ export type ResultCard = {
 const element = (id: string): HTMLElement => {
   const found = document.getElementById(id);
   if (!found) throw new Error(`Missing #${id}`);
+  return found;
+};
+
+const button = (id: string): HTMLButtonElement => {
+  const found = element(id);
+  if (!(found instanceof HTMLButtonElement)) throw new Error(`#${id} is not a button`);
   return found;
 };
 
@@ -74,12 +116,8 @@ const rowItem = (row: LeaderboardRow): HTMLLIElement => {
   return item;
 };
 
-/**
- * Wires the result card to one game. `load` fetches the caller's result and
- * resolves to null when it cannot be had; it never throws. `openGallery` is
- * the card's main next step: it runs after the card has closed.
- */
-export const createResultCard = (load: () => Promise<Result | null>, openGallery: () => void): ResultCard => {
+/** Wires the result card to one game. */
+export const createResultCard = ({ load, openGallery, share, answerJoin }: ResultCardOptions): ResultCard => {
   const layer = element('result-layer');
   const status = element('result-status');
   const body = element('result-body');
@@ -94,10 +132,28 @@ export const createResultCard = (load: () => Promise<Result | null>, openGallery
   const list = element('result-list');
   const retry = element('result-retry');
   const close = element('result-close');
+  const shareButton = button('result-share');
+  const joinBox = element('result-join');
+  const joinText = element('result-join-text');
+  const joinYes = button('result-join-yes');
+  const joinNo = button('result-join-no');
 
   const listeners = new AbortController();
   // Counts loads, so a slow reply for an earlier opening is dropped.
   let latest = 0;
+
+  let shareState: ShareState = 'ready';
+  const setShareState = (state: ShareState): void => {
+    shareState = state;
+    shareButton.textContent = shareButtonText(state);
+    shareButton.disabled = !canShare(state);
+  };
+
+  const setJoinBusy = (busy: boolean, text: string): void => {
+    joinYes.disabled = busy;
+    joinNo.disabled = busy;
+    joinText.textContent = text;
+  };
 
   const show = (result: Result): void => {
     stars.textContent = starText(result.stars);
@@ -108,6 +164,11 @@ export const createResultCard = (load: () => Promise<Result | null>, openGallery
     rarity.textContent = rarityText(result.rarity);
     streak.textContent = streakText(result.streak);
     record.textContent = recordText(result.record);
+    // A share in flight keeps its own state; otherwise the server knows best.
+    if (shareState !== 'sharing') setShareState(result.shared ? 'shared' : 'ready');
+    shareButton.hidden = false;
+    joinBox.hidden = !result.joinPrompt;
+    setJoinBusy(false, JOIN_PROMPT_TEXT);
 
     list.replaceChildren(...result.leaderboard.map(rowItem));
     if (result.own) {
@@ -151,6 +212,33 @@ export const createResultCard = (load: () => Promise<Result | null>, openGallery
     layer.hidden = true;
   };
 
+  const onShare = async (tap: Event): Promise<void> => {
+    if (!canShare(shareState)) return;
+    setShareState('sharing');
+    const outcome = await share(tap);
+    if (listeners.signal.aborted) return;
+    setShareState(outcome === 'done' ? 'shared' : outcome === 'failed' ? 'failed' : 'ready');
+  };
+
+  const onJoin = async (tap: Event): Promise<void> => {
+    setJoinBusy(true, 'Joining\u2026');
+    const outcome = await answerJoin('join', tap);
+    if (listeners.signal.aborted) return;
+    // Joined: the prompt has done its job and never comes back.
+    if (outcome === 'done') joinBox.hidden = true;
+    else setJoinBusy(false, outcome === 'failed' ? JOIN_FAILED_TEXT : JOIN_PROMPT_TEXT);
+  };
+
+  const onDismiss = (tap: Event): void => {
+    // Gone at once. If the answer does not reach the server, the prompt is
+    // offered again another time, which is the safe way round.
+    joinBox.hidden = true;
+    void answerJoin('dismiss', tap);
+  };
+
+  shareButton.addEventListener('click', (tap) => void onShare(tap), { signal: listeners.signal });
+  joinYes.addEventListener('click', (tap) => void onJoin(tap), { signal: listeners.signal });
+  joinNo.addEventListener('click', onDismiss, { signal: listeners.signal });
   retry.addEventListener('click', refresh, { signal: listeners.signal });
   close.addEventListener('click', hide, { signal: listeners.signal });
   gallery.addEventListener(

@@ -217,6 +217,9 @@ export const buildResult = async (post: PostRecord, stored: StoredSubmission): P
     record: { blocks: fewest, underPar: fewest < par },
     rarity: { same, share: Math.min(same / solvers, 1), smallSample: solvers < MIN_RARITY_SAMPLE },
     streak: shownStreak(await readStreak(userId), await newestDaily()),
+    // A share still being posted counts: the button must not offer a second one.
+    shared: (await redis.hGet(KEYS.shares(postId), userId)) !== undefined,
+    joinPrompt: (await redis.hGet(KEYS.joinPrompt, userId)) === undefined,
   };
 };
 

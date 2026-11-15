@@ -75,12 +75,35 @@ export type Result = {
   };
   /** Daily puzzles in a row. `current` is 0 once the latest finished one was missed. */
   streak: { current: number; best: number };
+  /** True once the caller has shared this result as a comment on the post. */
+  shared: boolean;
+  /** True while the caller has not yet answered the "Join the community" prompt. */
+  joinPrompt: boolean;
 };
 
 /** Response of GET /api/result. Only a player who has submitted gets the data. */
 export type ResultResponse =
   | { status: 'ok'; result: Result }
   | { status: 'not-submitted'; message: string };
+
+/**
+ * Response of POST /api/share. `shared` the first time; `already-shared`
+ * changes nothing. `failed` means no comment was posted and the player may
+ * try again.
+ */
+export type ShareResponse =
+  | { status: 'shared' | 'already-shared' }
+  | { status: 'not-submitted' | 'failed'; message: string };
+
+export const JOIN_CHOICES = ['join', 'dismiss'] as const;
+/** The player's answer to the "Join the community" prompt. */
+export type JoinChoice = (typeof JOIN_CHOICES)[number];
+
+/** Body of POST /api/join. */
+export type JoinRequest = { choice: JoinChoice };
+
+/** Response of POST /api/join. `failed` means the answer was not recorded. */
+export type JoinResponse = { status: 'ok' } | { status: 'failed'; message: string };
 
 export const GALLERY_SORTS = ['rarest', 'leanest'] as const;
 /** 'rarest': fewest builders first. 'leanest': fewest blocks first. */
@@ -272,6 +295,8 @@ const parseResult = (value: unknown): Result | null => {
   const { share } = rarity;
   if (typeof share !== 'number' || !(share >= 0 && share <= 1)) return null;
   if (!isRecord(streak) || !isCount(streak.current) || !isCount(streak.best)) return null;
+  const { shared, joinPrompt } = value;
+  if (typeof shared !== 'boolean' || typeof joinPrompt !== 'boolean') return null;
 
   return {
     blocks,
@@ -285,6 +310,8 @@ const parseResult = (value: unknown): Result | null => {
     record: { blocks: record.blocks, underPar: record.underPar },
     rarity: { same: rarity.same, share, smallSample: rarity.smallSample },
     streak: { current: streak.current, best: streak.best },
+    shared,
+    joinPrompt,
   };
 };
 
@@ -296,6 +323,27 @@ export const parseResultResponse = (value: unknown): ResultResponse | null => {
   if (value.status !== 'ok') return null;
   const result = parseResult(value.result);
   return result ? { status: 'ok', result } : null;
+};
+
+export const parseShareResponse = (value: unknown): ShareResponse | null => {
+  if (!isRecord(value)) return null;
+  const { status, message } = value;
+  if (status === 'shared' || status === 'already-shared') return { status };
+  if ((status === 'not-submitted' || status === 'failed') && typeof message === 'string') return { status, message };
+  return null;
+};
+
+export const parseJoinRequest = (value: unknown): JoinRequest | null => {
+  if (!isRecord(value)) return null;
+  const choice = JOIN_CHOICES.find((known) => known === value.choice);
+  return choice ? { choice } : null;
+};
+
+export const parseJoinResponse = (value: unknown): JoinResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'ok') return { status: 'ok' };
+  if (value.status === 'failed' && typeof value.message === 'string') return { status: 'failed', message: value.message };
+  return null;
 };
 
 const parseGalleryEntry = (value: unknown): GalleryEntry | null => {

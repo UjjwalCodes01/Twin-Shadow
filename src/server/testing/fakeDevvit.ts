@@ -13,6 +13,12 @@ export type FakeContext = {
 
 export type FakePost = { id: string; title: string; postData: Record<string, unknown> | undefined };
 
+/** A comment as the fake Reddit holds it. `authorName` is who Reddit says wrote it. */
+export type FakeComment = { id: string; postId: string; text: string; authorName: string; runAs: 'USER' | 'APP' };
+
+/** The name the fake Reddit gives the app's own account. */
+export const APP_ACCOUNT = 'the-app';
+
 export const createFakeDevvit = () => {
   const strings = new Map<string, string>();
   const hashes: Hashes = new Map();
@@ -23,6 +29,12 @@ export const createFakeDevvit = () => {
   let userFlairsEnabled = true;
   let failFlair = false;
   let failNextPost = false;
+  const comments: FakeComment[] = [];
+  const subscribers = new Set<string>();
+  let failComments = false;
+  let failCommentEdits = false;
+  let commentsAsApp = false;
+  let failSubscribing = false;
 
   const sortedSet = (key: string): Map<string, number> => {
     let found = sortedSets.get(key);
@@ -127,6 +139,37 @@ export const createFakeDevvit = () => {
       posts.push(post);
       return { id: post.id };
     },
+    // Like the real one, the comment comes back with its author and a way to
+    // edit it. With `commentsAsApp` on, a comment asked for "as the user" is
+    // written by the app's account instead, as Reddit may do.
+    submitComment: async (options: {
+      id: string;
+      text: string;
+      runAs?: 'USER' | 'APP';
+    }): Promise<{ id: string; authorName: string; edit: (edit: { text: string }) => Promise<void> }> => {
+      if (failComments) throw new Error('Comments are unavailable');
+      const runAs = options.runAs ?? 'APP';
+      const comment: FakeComment = {
+        id: `t1_comment${comments.length + 1}`,
+        postId: options.id,
+        text: options.text,
+        authorName: runAs === 'USER' && !commentsAsApp ? (context.username ?? 'unknown') : APP_ACCOUNT,
+        runAs,
+      };
+      comments.push(comment);
+      return {
+        id: comment.id,
+        authorName: comment.authorName,
+        edit: async (edit: { text: string }): Promise<void> => {
+          if (failCommentEdits) throw new Error('Editing is unavailable');
+          comment.text = edit.text;
+        },
+      };
+    },
+    subscribeToCurrentSubreddit: async (): Promise<void> => {
+      if (failSubscribing) throw new Error('Subscribing is unavailable');
+      if (context.username !== undefined) subscribers.add(context.username);
+    },
     getCurrentUsername: async (): Promise<string | undefined> => context.username,
     getCurrentSubreddit: async (): Promise<{ name: string; userFlairsEnabled: boolean }> => ({
       name: context.subredditName,
@@ -170,6 +213,26 @@ export const createFakeDevvit = () => {
     addModerator: (username: string): void => {
       moderators.add(username);
     },
+    /** Every comment posted so far, oldest first. */
+    comments,
+    /** The usernames subscribed to the subreddit through the app. */
+    subscribers: (): string[] => [...subscribers],
+    /** Makes every submitComment call throw, or work again. */
+    setCommentsFailing: (failing: boolean): void => {
+      failComments = failing;
+    },
+    /** Makes every edit of a comment throw, or work again. */
+    setCommentEditsFailing: (failing: boolean): void => {
+      failCommentEdits = failing;
+    },
+    /** Makes Reddit write "as the user" comments from the app's account, or stop. */
+    setCommentsAsApp: (asApp: boolean): void => {
+      commentsAsApp = asApp;
+    },
+    /** Makes every subscribeToCurrentSubreddit call throw, or work again. */
+    setSubscribingFailing: (failing: boolean): void => {
+      failSubscribing = failing;
+    },
     /** Makes the next submitCustomPost call throw. */
     failNextPost: (): void => {
       failNextPost = true;
@@ -194,6 +257,12 @@ export const createFakeDevvit = () => {
       userFlairsEnabled = true;
       failFlair = false;
       failNextPost = false;
+      comments.length = 0;
+      subscribers.clear();
+      failComments = false;
+      failCommentEdits = false;
+      commentsAsApp = false;
+      failSubscribing = false;
       context.postId = undefined;
       context.postData = undefined;
       context.userId = undefined;
