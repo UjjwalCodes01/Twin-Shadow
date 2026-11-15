@@ -26,6 +26,8 @@ const currentPost = async (): Promise<{ postId: string; post: PostRecord } | nul
   const { postId } = context;
   if (!postId) return null;
   const post = await loadPost(postId);
+  // Logged, so a post that cannot be played shows up in `devvit logs`.
+  if (!post) console.warn(`No saved puzzle for post ${postId}`);
   return post ? { postId, post } : null;
 };
 

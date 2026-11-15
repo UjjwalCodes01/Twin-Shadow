@@ -23,7 +23,8 @@ const SUBMIT_URL = '/api/submit';
 const RESULT_URL = '/api/result';
 const GALLERY_URL = '/api/gallery';
 
-type LoadState = 'loading' | 'ready' | 'error';
+/** 'missing' is a post with no puzzle saved for it: asking again cannot help, so there is no Retry. */
+type LoadState = 'loading' | 'ready' | 'error' | 'missing';
 type Game = { store: Store; scene: SceneHandle; stop: () => void };
 
 type GameOptions = {
@@ -48,13 +49,19 @@ const notice = element('notice');
 const noticeText = element('notice-text');
 const retryButton = element('retry');
 
+const NOTICES: Record<LoadState, string> = {
+  loading: 'Loading puzzle\u2026',
+  ready: '',
+  error: "Couldn't load this puzzle.",
+  missing: 'This post has no puzzle. Open a newer Twin Shadows post.',
+};
+
 // CSS shows the HUD only when the page is ready.
 const setLoadState = (state: LoadState): void => {
   document.body.dataset.state = state;
   notice.hidden = state === 'ready';
   retryButton.hidden = state !== 'error';
-  noticeText.textContent =
-    state === 'error' ? "Couldn't load this puzzle." : 'Loading puzzle\u2026';
+  noticeText.textContent = NOTICES[state];
 };
 
 /**
@@ -234,6 +241,11 @@ async function loadPostPuzzle(): Promise<void> {
   setLoadState('loading');
   try {
     const response = await fetch(PUZZLE_URL);
+    if (response.status === 404) {
+      // The server knows this post and has no puzzle for it.
+      setLoadState('missing');
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body: unknown = await response.json();
     const parsed = parsePuzzleResponse(body);

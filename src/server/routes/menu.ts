@@ -26,7 +26,8 @@ menu.post('/post-create', async (c) => {
       console.warn(`Post creation refused: ${context.username ?? 'a logged-out caller'} is not a moderator`);
       return c.json<UiResponse>({ showToast: 'Only moderators can create posts' }, 403);
     }
-    const { postId } = await createNextPost('manual');
+    const { postId, number, puzzle } = await createNextPost('manual');
+    console.log(`Menu post created: Twin Shadows #${number} (${postId}) with puzzle ${puzzle.id}`);
     return c.json<UiResponse>(
       { navigateTo: `https://reddit.com/r/${context.subredditName}/comments/${postId}` },
       200
