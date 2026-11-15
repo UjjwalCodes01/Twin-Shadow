@@ -14,7 +14,9 @@ import {
 import type { Submission } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { sortBlocks, starsFor } from '../shared/score';
-import { blockText, starText } from './result';
+import { paintWall, type WallKind } from './paint';
+import { blockText } from './result';
+import { showStars, starRow, starsLabel } from './stars';
 import type { GameState, Store } from './store';
 
 export type SubmitOutcome = { ok: true; submission: Submission } | { ok: false; message: string };
@@ -32,10 +34,32 @@ export type HudOptions = {
 
 /** Longest side of a silhouette panel, in CSS px. */
 const PANEL_PX = 84;
-const PANEL_GAP_PX = 2;
+/** Panels are drawn no finer than this many canvas pixels per CSS pixel. */
+const MAX_PANEL_RATIO = 3;
 const RESET_CONFIRM_MS = 3000;
 
-type Panel = { root: HTMLElement; cells: HTMLElement[][] };
+/** A silhouette panel: a small sheet painted exactly as its wall is. */
+type Panel = {
+  root: HTMLElement;
+  kind: WallKind;
+  context: CanvasRenderingContext2D | null;
+  columns: number;
+  rows: number;
+  /** Canvas pixels per cell, and per CSS pixel. */
+  cell: number;
+  ratio: number;
+  /** What was last painted, so an unchanged panel is left alone. */
+  last: string;
+};
+
+/**
+ * What the Submit button says. Short enough to stay on one line beside the
+ * panels on a narrow screen: the block count, without the word.
+ */
+export const submitText = (solved: boolean, submitting: boolean, blocks: number): string => {
+  if (submitting) return 'Submitting\u2026';
+  return solved ? `Submit ${blocks}` : 'Submit';
+};
 
 const element = (id: string): HTMLElement => {
   const found = document.getElementById(id);
@@ -50,40 +74,41 @@ const button = (id: string): HTMLButtonElement => {
 };
 
 /**
- * Builds a flat grid for one silhouette. Rows are drawn top first and columns
- * left to right, and never change with the board's rotation.
+ * Builds the canvas for one silhouette panel. It is drawn top row first and
+ * left to right, and never changes with the board's rotation.
  */
-const buildPanel = (id: string, columns: number, rows: number): Panel => {
+const buildPanel = (id: string, kind: WallKind, columns: number, rows: number): Panel => {
   const root = element(id);
-  const grid = element(`${id}-grid`);
-  grid.replaceChildren();
-  const cellPx = Math.floor(
-    (PANEL_PX - PANEL_GAP_PX * (Math.max(columns, rows) - 1)) / Math.max(columns, rows)
-  );
-  grid.style.gridTemplateColumns = `repeat(${columns}, ${cellPx}px)`;
-  grid.style.gridAutoRows = `${cellPx}px`;
-  grid.style.gap = `${PANEL_GAP_PX}px`;
-
-  const cells: HTMLElement[][] = Array.from({ length: rows }, () => []);
-  for (let y = rows - 1; y >= 0; y--) {
-    for (let column = 0; column < columns; column++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell empty';
-      grid.append(cell);
-      cells[y]?.push(cell);
-    }
-  }
-  return { root, cells };
+  const holder = element(`${id}-grid`);
+  const cellPx = Math.floor(PANEL_PX / Math.max(columns, rows));
+  const ratio = Math.min(window.devicePixelRatio || 1, MAX_PANEL_RATIO);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(columns * cellPx * ratio);
+  canvas.height = Math.round(rows * cellPx * ratio);
+  canvas.style.width = `${columns * cellPx}px`;
+  canvas.style.height = `${rows * cellPx}px`;
+  // The panel's section already says which shadow this is.
+  canvas.setAttribute('aria-hidden', 'true');
+  holder.replaceChildren(canvas);
+  return { root, kind, context: canvas.getContext('2d'), columns, rows, cell: cellPx * ratio, ratio, last: '' };
 };
 
+/** `states` is indexed [y][column] with y = 0 at the floor, as the rules give it. */
 const paintPanel = (panel: Panel, states: CellState[][]): void => {
-  panel.cells.forEach((row, y) => {
-    row.forEach((cell, column) => {
-      cell.className = `cell ${states[y]?.[column] ?? 'empty'}`;
-    });
-  });
   const solved = states.every((row) => row.every((state) => state === 'match' || state === 'empty'));
   panel.root.classList.toggle('solved', solved);
+  const signature = JSON.stringify(states);
+  if (!panel.context || signature === panel.last) return;
+  panel.last = signature;
+  paintWall(panel.context, {
+    kind: panel.kind,
+    columns: panel.columns,
+    rows: panel.rows,
+    cell: panel.cell,
+    // The painter wants the top row first.
+    states: [...states].reverse(),
+    unit: panel.ratio,
+  });
 };
 
 /** Wires the HUD to one game. Returns a function that unwires it again. */
@@ -91,10 +116,11 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
   const { size } = puzzle;
   const frontTarget: Grid = parseSilhouette(puzzle.front);
   const sideTarget: Grid = parseSilhouette(puzzle.side);
-  const frontPanel = buildPanel('panel-front', size.w, size.h);
-  const sidePanel = buildPanel('panel-side', size.d, size.h);
+  const frontPanel = buildPanel('panel-front', 'front', size.w, size.h);
+  const sidePanel = buildPanel('panel-side', 'side', size.d, size.h);
 
-  const blockCount = element('block-count');
+  const countBlocks = element('count-blocks');
+  const countPar = element('count-par');
   const floatingWarning = element('floating-warning');
   const starsLine = element('stars');
   const submitButton = button('submit');
@@ -169,17 +195,15 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     starsLine.hidden = !solved || submission !== null;
     if (solved) {
       const stars = starsFor(blocks.size, puzzle.par);
-      starsLine.textContent = starText(stars);
-      starsLine.setAttribute('aria-label', `${stars} of 3 stars`);
+      showStars(starsLine, stars);
     }
 
     submitButton.hidden = submission !== null;
     submitButton.disabled = !solved || submitting || options.submitBlocked !== null;
-    submitButton.textContent = submitting
-      ? 'Submitting\u2026'
-      : solved
-        ? `Submit ${blockText(blocks.size)}`
-        : 'Submit';
+    submitButton.textContent = submitText(solved, submitting, blocks.size);
+    // The button shows the count alone; read aloud, it says what the number is.
+    if (solved && !submitting) submitButton.setAttribute('aria-label', `Submit ${blockText(blocks.size)}`);
+    else submitButton.removeAttribute('aria-label');
 
     const note = submission ? null : (options.submitBlocked ?? failure);
     submitNote.hidden = note === null;
@@ -189,10 +213,10 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     // Once submitted, a small button brings the result card back.
     resultButton.hidden = submission === null || options.openResult === null;
     if (submission) {
-      resultButton.textContent = `Results ${starText(submission.stars)}`;
+      resultButton.replaceChildren('Results ', starRow(submission.stars));
       resultButton.setAttribute(
         'aria-label',
-        `Results: ${blockText(submission.blocks)}, par ${submission.par}, ${submission.stars} of 3 stars`
+        `Results: ${blockText(submission.blocks)}, par ${submission.par}, ${starsLabel(submission.stars)}`
       );
     }
   };
@@ -202,7 +226,8 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget));
     paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget));
 
-    blockCount.textContent = `${blockText(blocks.size)}, par ${puzzle.par}`;
+    countBlocks.textContent = blockText(blocks.size);
+    countPar.textContent = `par ${puzzle.par}`;
 
     const floating = findFloating(blocks).length;
     floatingWarning.hidden = floating === 0;

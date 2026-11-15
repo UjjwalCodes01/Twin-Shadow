@@ -1,6 +1,7 @@
-/* Layout only. Every colour, font, corner radius and line weight is a variable
-   whose value comes from src/client/theme.ts, which sets them on the root
-   element before anything is drawn. Nothing here names a colour. */
+/* Layout and sizes only. Every colour, font, corner radius, line weight and
+   shadow is a variable whose value lives in src/client/theme.ts: the build
+   writes those values in above this, and nothing here names a colour. */
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -21,17 +22,15 @@ body {
   color: var(--ink);
 }
 
-/* A theme may lay a pattern or a glow over the page colour. */
-body {
-  background-image: var(--page-image);
-  background-size: var(--page-size);
-}
-
 /* Portrait first: readout on top, board in the middle, controls in thumb reach. */
 body {
+  /* Lamplight over the page colour. */
+  background-image: var(--page-image);
   display: grid;
   /* The viewing row is empty, and so has no height, unless its banner is shown. */
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* One column exactly as wide as the screen, whatever is in it. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     'readout'
     'viewing'
@@ -40,6 +39,73 @@ body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* --- Buttons ---------------------------------------------------------------
+   One kind of button everywhere: a small raised tile. Pressing it takes the
+   raise away; a button that cannot be pressed is flat, with a dashed edge. */
+button {
+  border: var(--line-thin) solid var(--ink);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--control-shadow);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:active:not(:disabled) {
+  box-shadow: var(--control-shadow-pressed);
+  transform: translateY(1px);
+}
+
+button:disabled {
+  border-style: dashed;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  box-shadow: none;
+  font-weight: 400;
+  cursor: default;
+}
+
+/* The one button on a screen that matters most, and whichever of a pair is chosen. */
+.submit,
+.result-open,
+.card-button:not(.secondary),
+.join-button:not(.secondary),
+#viewing-back,
+.notice button,
+.mode button[aria-pressed='true'],
+.gallery-sort button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* --- Stars: drawn shapes, filled when earned and outlined when not ---------- */
+.star-row {
+  display: inline-flex;
+  gap: 0.12em;
+  vertical-align: middle;
+}
+
+.star {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: var(--star-line);
+  stroke-width: var(--star-stroke);
+  stroke-linejoin: round;
+}
+
+.star.earned {
+  fill: var(--star-fill);
+}
+
+/* On a dark button the outline has to be light to show. */
+.result-open .star {
+  stroke: var(--surface);
 }
 
 /* --- Board ---------------------------------------------------------------- */
@@ -68,23 +134,19 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
   padding: 16px;
   text-align: center;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
   color: var(--ink-soft);
 }
 
 .notice button {
-  min-width: 120px;
-  min-height: 44px;
+  min-width: 128px;
+  min-height: 48px;
   padding: 0 24px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--surface);
   font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 /* --- Viewing banner: whose sculpture is on the board, and the way back ------ */
@@ -94,7 +156,7 @@ body {
   max-width: 560px;
   justify-self: center;
   display: grid;
-  gap: 2px;
+  gap: 1px;
   padding: 6px 12px 4px;
   text-align: center;
 }
@@ -102,7 +164,7 @@ body {
 .viewing-owner {
   font-family: var(--font-display);
   overflow: hidden;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -116,33 +178,14 @@ body {
 .viewing-actions {
   display: grid;
   grid-template-columns: 1fr 1.6fr 1fr;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .viewing-actions button {
   min-height: 44px;
   padding: 0 6px;
-  border: var(--line-thin) solid var(--ink);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.viewing-actions button:disabled {
-  border-color: var(--line);
-  color: var(--line);
-  cursor: default;
-}
-
-#viewing-back {
-  background: var(--ink);
-  color: var(--surface);
-  font-weight: 700;
+  font-size: 0.86rem;
 }
 
 /* The HUD means nothing until a puzzle is on the board. */
@@ -161,8 +204,8 @@ body:not([data-state='ready']) .controls {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px 4px;
+  gap: 6px;
+  padding: 8px 10px 4px;
 }
 
 .panel {
@@ -171,38 +214,28 @@ body:not([data-state='ready']) .controls {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px 6px;
+  padding: 3px 5px 5px;
   border: var(--line-strong) solid transparent;
   border-radius: var(--radius-control);
 }
 
 .panel.front {
   --accent: var(--front);
-  --match-bg: var(--front-match-bg);
-  --match-border: var(--front-match-border);
-  --match-shadow: var(--front-match-shadow);
-  --missing-bg: var(--front-missing-bg);
-  --missing-border: var(--front-missing-border);
 }
 
 .panel.side {
   --accent: var(--side);
-  --match-bg: var(--side-match-bg);
-  --match-border: var(--side-match-border);
-  --match-shadow: var(--side-match-shadow);
-  --missing-bg: var(--side-missing-bg);
-  --missing-border: var(--side-missing-border);
 }
 
 .panel-label {
   font-family: var(--font-display);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  letter-spacing: var(--label-spacing);
-  text-transform: var(--label-case);
+  letter-spacing: 0.02em;
   color: var(--accent);
 }
 
+/* A shadow that is exactly right gets a frame in its lamp's colour and a tick. */
 .panel.solved {
   border-color: var(--accent);
   background: var(--surface);
@@ -212,31 +245,16 @@ body:not([data-state='ready']) .controls {
   content: ' \2713';
 }
 
+/* The panel is a small sheet of the same paper as its wall, painted on a canvas. */
 .panel-grid {
-  display: grid;
+  display: flex;
+  line-height: 0;
 }
 
-.cell {
-  border-radius: var(--radius-cell);
-  background: var(--cell-bg);
-  border: var(--cell-border);
-}
-
-.cell.match {
-  background: var(--match-bg);
-  border: var(--match-border);
-  box-shadow: var(--match-shadow);
-}
-
-.cell.missing {
-  background: var(--missing-bg);
-  border: var(--missing-border);
-}
-
-.cell.extra {
-  background: var(--extra-bg);
-  border: var(--extra-border);
-  box-shadow: var(--extra-shadow);
+.panel-grid canvas {
+  display: block;
+  border-radius: 1px;
+  box-shadow: var(--panel-shadow);
 }
 
 .status {
@@ -245,75 +263,82 @@ body:not([data-state='ready']) .controls {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding-top: 4px;
+  gap: 5px;
+  padding-top: 3px;
   text-align: center;
 }
 
+/* "24 blocks par 18": the count leads and par follows it, always on one line. */
 .block-count {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.4em;
+  max-width: 100%;
   font-family: var(--font-display);
-  font-size: var(--count-size);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.count-blocks {
+  font-family: inherit;
+  font-size: 1rem;
   font-weight: 700;
 }
 
-.floating-warning {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--floating);
+.count-par {
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--ink-soft);
 }
 
 .stars {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   line-height: 1;
-  letter-spacing: 0.1em;
-  color: var(--floating);
 }
 
-.submit {
+/* A block with nothing under it: flagged with the same dashed line it wears on the board. */
+.floating-warning {
+  padding: 1px 9px 2px;
+  border: var(--line-thin) dashed var(--warn);
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.submit,
+.result-open {
   min-width: 96px;
+  max-width: 100%;
   min-height: 44px;
   padding: 0 10px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
-.submit:disabled {
-  background: transparent;
-  border: var(--line-thin) solid var(--line);
-  color: var(--ink-soft);
-  font-weight: 600;
-  cursor: default;
+.result-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
 }
 
+/* Why Submit is off, or what went wrong: a pencilled note under the button. */
 .submit-note {
-  font-size: 0.75rem;
+  font-size: 0.74rem;
+  font-style: italic;
+  line-height: 1.25;
   color: var(--ink-soft);
   text-wrap: balance;
 }
 
 .submit-note.failed {
-  color: var(--extra);
-  font-weight: 600;
-}
-
-.result-open {
-  min-width: 96px;
-  min-height: 44px;
-  padding: 0 10px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 0.85rem;
+  font-style: normal;
   font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
+  color: var(--extra);
 }
 
 /* --- Result card: over everything, with the list as the only part that scrolls */
@@ -348,59 +373,72 @@ body:not([data-state='ready']) .controls {
 
 .result-title {
   font-family: var(--font-display);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-soft);
 }
 
 .result-status {
   padding: 24px 0;
+  font-style: italic;
   color: var(--ink-soft);
 }
 
-/* The body takes the space the card has left, so the button below stays put. */
+/* The body takes the space the card has left, so the buttons below stay put. */
 .result-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
+/* The three things the eye should land on, largest first: stars, blocks
+   against par, rank. */
 .result-stars {
-  font-size: 1.9rem;
-  line-height: 1.1;
-  letter-spacing: 0.12em;
-  color: var(--floating);
+  font-size: 2.1rem;
+  line-height: 1.05;
 }
 
 .result-blocks {
   font-family: var(--font-display);
-  font-size: 1.05rem;
+  margin-top: 2px;
+  font-size: 1.3rem;
   font-weight: 700;
+  line-height: 1.2;
 }
 
 .result-under {
   align-self: center;
+  margin: 2px 0;
   padding: 2px 10px;
   border-radius: var(--radius-pill);
   background: var(--front);
   color: var(--on-strong);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
 .result-rank {
   font-family: var(--font-display);
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.08rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
+/* Rarity, streak and the community's best: smaller and quieter, under a rule. */
 .result-line {
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
   color: var(--ink-soft);
+}
+
+.result-rank + .result-line {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: var(--line-thin) solid var(--line);
 }
 
 .result-list {
@@ -408,12 +446,12 @@ body:not([data-state='ready']) .controls {
   position: relative;
   flex: 0 1 auto;
   min-height: 32px;
-  margin-top: 6px;
+  margin-top: 8px;
   overflow-y: auto;
   overscroll-behavior: contain;
   list-style: none;
   border: var(--line-thin) solid var(--line);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-small);
   background: var(--list-bg);
   text-align: left;
 }
@@ -425,7 +463,7 @@ body:not([data-state='ready']) .controls {
   align-items: center;
   min-height: 30px;
   padding: 0 10px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -465,27 +503,13 @@ body:not([data-state='ready']) .controls {
   border-top: var(--line-thin) solid var(--page);
 }
 
-.card-button,
-.result-retry {
-  flex: none;
-  min-height: 48px;
-  padding: 0 16px;
-  border: var(--line-thin) solid var(--ink);
-  border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-/* The result card's buttons: the main one, then two quieter ones side by side. */
+/* The card's buttons: the main one, then two quieter ones side by side. */
 .card-actions {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 2px;
 }
 
 .card-row {
@@ -494,35 +518,48 @@ body:not([data-state='ready']) .controls {
   gap: 8px;
 }
 
+.card-button,
+.result-retry {
+  flex: none;
+  min-height: 48px;
+  padding: 0 16px;
+  font-size: 1rem;
+}
+
+.card-button.secondary,
+.result-retry {
+  min-height: 44px;
+  font-size: 0.92rem;
+}
+
 .card-row .card-button {
   flex: 1 1 0;
   min-width: 0;
   padding: 0 6px;
 }
 
-.card-button:disabled {
-  border-color: var(--line);
-  color: var(--ink-soft);
-  cursor: default;
+.result-retry {
+  align-self: center;
 }
 
-/* The one-time "Join the community" prompt, under the leaderboard. */
+/* The one-time "Join the community" prompt, under the leaderboard: a note
+   pinned to the card, with its two answers. */
 .result-join {
   flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
   padding: 6px 6px 6px 10px;
-  border: var(--line-thin) solid var(--line);
-  border-radius: var(--radius-control);
+  border: var(--line-thin) dashed var(--line);
+  border-radius: var(--radius-small);
   text-align: left;
 }
 
 .result-join-text {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   line-height: 1.25;
 }
 
@@ -530,40 +567,13 @@ body:not([data-state='ready']) .controls {
   flex: none;
   min-height: 44px;
   padding: 0 12px;
-  border: var(--line-thin) solid var(--ink);
-  border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
-  touch-action: manipulation;
+  font-size: 0.88rem;
 }
 
 .join-button.secondary {
   border-color: var(--line);
-  background: transparent;
-  color: var(--ink-soft);
-  font-weight: 600;
-}
-
-.join-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* The quieter of two buttons, and Retry. */
-.card-button.secondary,
-.result-retry {
-  min-height: 44px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.result-retry {
-  align-self: center;
+  box-shadow: none;
+  font-weight: 400;
 }
 
 /* --- Gallery list ---------------------------------------------------------- */
@@ -575,13 +585,7 @@ body:not([data-state='ready']) .controls {
 
 .gallery-sort button {
   min-height: 44px;
-  border: var(--line-thin) solid var(--ink);
-  background: transparent;
-  color: var(--ink);
   font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
 }
 
 .gallery-sort button:first-child {
@@ -593,17 +597,13 @@ body:not([data-state='ready']) .controls {
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
-.gallery-sort button[aria-pressed='true'] {
-  background: var(--ink);
-  color: var(--surface);
-}
-
 /* The gallery card is mostly list, so the list takes all the room there is. */
 .gallery-list {
   flex: 1 1 auto;
   margin-top: 0;
 }
 
+/* A row is a button, but lies flat in the list like a line in a ledger. */
 .gallery-row,
 .gallery-more {
   width: 100%;
@@ -611,11 +611,18 @@ body:not([data-state='ready']) .controls {
   padding: 6px 12px;
   border: none;
   border-bottom: var(--line-thin) solid var(--page);
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--ink);
   text-align: left;
-  cursor: pointer;
-  touch-action: manipulation;
+}
+
+.gallery-row:active:not(:disabled),
+.gallery-more:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  background: var(--page);
 }
 
 .gallery-row {
@@ -629,7 +636,8 @@ body:not([data-state='ready']) .controls {
 }
 
 .gallery-row-main {
-  font-size: 0.9rem;
+  font-family: var(--font-display);
+  font-size: 0.94rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -637,6 +645,7 @@ body:not([data-state='ready']) .controls {
 .gallery-row-sub {
   overflow: hidden;
   font-size: 0.8rem;
+  font-weight: 400;
   color: var(--ink-soft);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -648,7 +657,6 @@ body:not([data-state='ready']) .controls {
 
 .gallery-more {
   font-size: 0.9rem;
-  font-weight: 600;
   text-align: center;
 }
 
@@ -659,30 +667,18 @@ body:not([data-state='ready']) .controls {
   max-width: 560px;
   justify-self: center;
   display: grid;
-  grid-template-columns: 2.5fr repeat(4, 1fr);
+  /* Add and Remove share what is left after four buttons that never go below 44px. */
+  grid-template-columns: minmax(0, 3fr) repeat(4, minmax(44px, 1fr));
   gap: 6px;
-  padding: 6px 8px 10px;
+  padding: 8px 8px 12px;
 }
 
 .controls button {
   min-width: 44px;
   min-height: 48px;
   padding: 0 4px;
-  border: var(--line-thin) solid var(--ink);
-  border-radius: var(--radius-control);
-  box-shadow: var(--control-shadow);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.controls button:disabled {
-  border-color: var(--line);
-  color: var(--line);
-  cursor: default;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .controls button svg {
@@ -697,6 +693,7 @@ body:not([data-state='ready']) .controls {
   stroke-linejoin: round;
 }
 
+/* Add and Remove: two halves of one tile, the chosen half inked in. */
 .mode {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -711,16 +708,11 @@ body:not([data-state='ready']) .controls {
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
-.mode button[aria-pressed='true'] {
-  background: var(--ink);
-  color: var(--surface);
-}
-
 /* While viewing, the chosen mode must not look as if it still does something. */
 .mode button[aria-pressed='true']:disabled {
+  border-style: solid;
   background: var(--line);
-  border-color: var(--line);
-  color: var(--surface);
+  color: var(--ink);
 }
 
 #reset.armed {
@@ -729,6 +721,7 @@ body:not([data-state='ready']) .controls {
   color: var(--on-strong);
 }
 
+/* TEMPORARY: the debug bar. Plain on purpose; it is removed before release. */
 .debug-bar {
   grid-column: 1 / -1;
   display: flex;
@@ -770,9 +763,49 @@ body:not([data-state='ready']) .controls {
   padding: 0 12px;
   border-color: var(--line);
   background: transparent;
+  box-shadow: none;
   color: var(--ink-soft);
   font-size: 0.8rem;
   font-weight: 400;
+}
+
+/* --- A narrow phone: a little less room for each label ---------------------- */
+@media (max-width: 340px) {
+  .controls {
+    grid-template-columns: minmax(0, 1fr) repeat(4, 44px);
+    gap: 3px;
+    padding: 8px 4px 12px;
+  }
+
+  .controls button {
+    padding: 0 2px;
+    font-size: 0.76rem;
+  }
+
+  /* The two halves share their track evenly rather than pushing past it. */
+  .mode button {
+    min-width: 0;
+  }
+
+  .readout {
+    gap: 4px;
+    padding: 8px 6px 4px;
+  }
+
+  /* Should the count ever be too long for so narrow a screen, par drops to a
+     second line instead of pushing the panels apart. */
+  .block-count {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .count-blocks {
+    font-size: 0.88rem;
+  }
+
+  .count-par {
+    font-size: 0.74rem;
+  }
 }
 
 /* --- Landscape on a short screen: readout left, board centre, controls right */
@@ -811,13 +844,13 @@ body:not([data-state='ready']) .controls {
 
   .status {
     flex: none;
-    max-width: 124px;
+    max-width: 132px;
     padding-top: 0;
   }
 
   .result-open,
   .submit {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
   }
 
   /* A short, wide screen: tighten the card so the list still gets a few rows. */
@@ -828,7 +861,16 @@ body:not([data-state='ready']) .controls {
   }
 
   .result-stars {
-    font-size: 1.4rem;
+    font-size: 1.5rem;
+  }
+
+  .result-blocks {
+    font-size: 1.1rem;
+  }
+
+  .result-rank + .result-line {
+    margin-top: 2px;
+    padding-top: 3px;
   }
 
   /* All three buttons on one line, which leaves room for the join prompt. */
@@ -840,7 +882,7 @@ body:not([data-state='ready']) .controls {
     flex: 3 1 0;
     min-height: 44px;
     padding: 0 8px;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
   }
 
   .card-row {
@@ -852,11 +894,10 @@ body:not([data-state='ready']) .controls {
     padding: 2px 4px 2px 10px;
   }
 
-
   .controls {
     grid-template-columns: 1fr 1fr;
     align-content: center;
-    width: 132px;
+    width: 160px;
     padding: 6px 8px;
   }
 

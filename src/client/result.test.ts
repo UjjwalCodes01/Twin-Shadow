@@ -7,7 +7,6 @@ import {
   rarityText,
   recordText,
   shareButtonText,
-  starText,
   streakText,
 } from './result';
 
@@ -72,10 +71,6 @@ describe('recordText', () => {
 });
 
 describe('small labels', () => {
-  it('draws filled and empty stars', () => {
-    expect(starText(2)).toBe('★★☆');
-  });
-
   it('counts blocks in the singular and plural', () => {
     expect(blockText(1)).toBe('1 block');
     expect(blockText(9)).toBe('9 blocks');

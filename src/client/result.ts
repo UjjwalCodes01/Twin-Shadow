@@ -3,6 +3,7 @@
 
 import type { JoinChoice, LeaderboardRow, Result } from '../shared/api';
 import { rarityPercent } from '../shared/share';
+import { showStars } from './stars';
 
 // --- Wording (no DOM, so it can be tested) ---------------------------------------
 
@@ -31,8 +32,6 @@ export const rarityText = ({ same, share, smallSample }: Result['rarity']): stri
 /** "Streak: 3", with the best streak added only when it is higher. */
 export const streakText = ({ current, best }: Result['streak']): string =>
   best > current ? `Streak: ${current} · Best: ${best}` : `Streak: ${current}`;
-
-export const starText = (stars: number): string => '★'.repeat(stars) + '☆'.repeat(3 - stars);
 
 export const blockText = (count: number): string => `${count} ${count === 1 ? 'block' : 'blocks'}`;
 
@@ -156,8 +155,7 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
   };
 
   const show = (result: Result): void => {
-    stars.textContent = starText(result.stars);
-    stars.setAttribute('aria-label', `${result.stars} of 3 stars`);
+    showStars(stars, result.stars);
     blocks.textContent = `${blockText(result.blocks)} · par ${result.par}`;
     underPar.hidden = result.blocks >= result.par;
     rank.textContent = rankText(result);

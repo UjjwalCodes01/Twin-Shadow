@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_THEME, HUD_VARIABLES, isThemeId, THEME_IDS, THEMES, toneIndex, type Theme } from './theme';
+import frauncesLicence from './fonts/fraunces/OFL.txt?raw';
+import stylesheet from './game.css?raw';
+import { HUD_VARIABLES, pickFor, THEME } from './theme';
 
-const themes: Theme[] = THEME_IDS.map((id) => THEMES[id]);
-// The three art directions. "plain" is the look the game already had, kept as it was.
-const directions = themes.filter((theme) => theme.id !== 'plain');
+/** The licence text kept beside each bundled font, by the font's folder. */
+const LICENCES: Record<string, string> = { fraunces: frauncesLicence };
+
+const { hud } = THEME;
 
 /** Relative luminance of a #rrggbb colour, as WCAG defines it. */
 const luminance = (colour: string): number => {
@@ -22,105 +25,124 @@ const contrast = (a: string, b: string): number => {
   return ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
 };
 
-describe('every theme', () => {
-  it('is listed under its own id', () => {
-    for (const id of THEME_IDS) expect(THEMES[id].id).toBe(id);
-    expect(DEFAULT_THEME.id).toBe('plain');
+// The page is the page colour under a gradient of lamplight. Text that sits
+// straight on the page can be over any part of it, so it is checked against
+// every colour the gradient passes through.
+const pageColours = [hud['--page'], ...(hud['--page-image'].match(/#[0-9a-f]{6}/gi) ?? [])];
+
+describe('the HUD values', () => {
+  it('give every variable the stylesheet reads a value', () => {
+    for (const name of HUD_VARIABLES) expect(hud[name], name).toMatch(/\S/);
+    expect(Object.keys(hud).sort()).toEqual([...HUD_VARIABLES].sort());
   });
 
-  it('gives every HUD variable a value', () => {
-    for (const theme of themes) {
-      for (const name of HUD_VARIABLES) {
-        expect(theme.hud[name], `${theme.id} ${name}`).toMatch(/\S/);
-      }
-      expect(Object.keys(theme.hud).sort(), theme.id).toEqual([...HUD_VARIABLES].sort());
-    }
-  });
-
-  it('has at least one tone for its blocks', () => {
-    for (const theme of themes) expect(theme.scene.blocks.tones.length, theme.id).toBeGreaterThan(0);
-  });
-
-  it('only names fonts it bundles', () => {
-    for (const theme of themes) {
-      for (const font of theme.fonts) {
-        expect(font.url, `${theme.id} ${font.family}`).toMatch(/\/fonts\/[a-z-]+\/[a-z0-9-]+\.woff2$/);
-        expect(font.url).not.toMatch(/^https?:/);
-        expect(theme.hud['--font-body'] + theme.hud['--font-display']).toContain(font.family);
-      }
+  it('are the only place the stylesheet takes a colour from', () => {
+    const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, '');
+    // No colour written out: not as #hex (three to eight hex digits, which no
+    // id in the stylesheet is), not as rgb() or hsl().
+    expect(css.match(/#[0-9a-f]{3,8}(?![\w-])/gi) ?? []).toEqual([]);
+    expect(css).not.toMatch(/\b(rgb|rgba|hsl|hsla)\(/);
+    // Every variable it reads is one the theme gives, apart from the ones a rule sets for itself.
+    const read = new Set([...css.matchAll(/var\((--[a-z-]+)/g)].map((found) => found[1]));
+    const local = new Set(['--accent']);
+    for (const name of read) {
+      if (name === undefined || local.has(name)) continue;
+      expect(HUD_VARIABLES, name).toContain(name);
     }
   });
 });
 
-describe('the plain theme', () => {
-  it('keeps the colours the game has always had', () => {
-    const { hud, scene } = THEMES.plain;
-    expect(hud['--page']).toBe('#e9e6df');
-    expect(hud['--front']).toBe('#1f7a6d');
-    expect(hud['--side']).toBe('#7a4fb0');
-    expect(scene.background).toBe(0xe9e6df);
-    expect(scene.blocks.tones).toEqual([0x7aa2c8]);
-    expect(THEMES.plain.fonts).toEqual([]);
-  });
-});
+describe('text contrast', () => {
+  // Every pairing of lettering and background the stylesheet makes, each at
+  // least 4.5 to 1.
+  const onPage = ['--ink', '--ink-soft', '--front', '--side', '--warn', '--extra'] as const;
+  const pairs: [text: string, background: string, where: string][] = [
+    ...pageColours.flatMap((page) =>
+      onPage.map((name): [string, string, string] => [hud[name], page, `${name} on the page (${page})`])
+    ),
+    [hud['--ink'], hud['--surface'], 'ink on a card'],
+    [hud['--ink-soft'], hud['--surface'], 'soft ink on a card'],
+    [hud['--front'], hud['--surface'], 'the Front label on a solved panel'],
+    [hud['--side'], hud['--surface'], 'the Side label on a solved panel'],
+    [hud['--extra'], hud['--surface'], 'an error on a card'],
+    [hud['--ink'], hud['--list-bg'], 'ink in a list'],
+    [hud['--ink-soft'], hud['--list-bg'], 'soft ink in a list'],
+    [hud['--surface'], hud['--ink'], 'a filled button'],
+    [hud['--on-strong'], hud['--front'], 'the Under par mark'],
+    [hud['--on-strong'], hud['--extra'], 'the armed Reset button'],
+    [hud['--ink'], hud['--line'], 'the chosen mode while viewing'],
+  ];
 
-describe('the three art directions', () => {
-  it('keep text readable against the page and against cards', () => {
-    for (const { id, hud } of directions) {
-      for (const background of [hud['--page'], hud['--surface']]) {
-        expect(contrast(hud['--ink'], background), `${id} ink on ${background}`).toBeGreaterThanOrEqual(7);
-        expect(contrast(hud['--ink-soft'], background), `${id} soft ink on ${background}`).toBeGreaterThanOrEqual(4.5);
-      }
-      // Buttons are filled with the ink colour and lettered in the surface colour.
-      expect(contrast(hud['--surface'], hud['--ink']), `${id} button`).toBeGreaterThanOrEqual(7);
-      // The panel labels, the star line and warnings are lettered in these.
-      for (const name of ['--front', '--side', '--floating', '--extra'] as const) {
-        expect(contrast(hud[name], hud['--page']), `${id} ${name} on the page`).toBeGreaterThanOrEqual(4.5);
-      }
+  it('is at least 4.5 to 1 for all lettering', () => {
+    for (const [text, background, where] of pairs) {
+      expect(contrast(text, background), where).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it('tell matched, missing and extra cells apart by more than colour', () => {
-    for (const { id, hud } of directions) {
-      for (const side of ['front', 'side'] as const) {
-        const match = hud[`--${side}-match-bg`];
-        const missing = hud[`--${side}-missing-bg`];
-        // Missing is an empty outline; matched is filled in.
-        expect(missing, `${id} ${side} missing`).toBe('transparent');
-        expect(match, `${id} ${side} match`).not.toBe('transparent');
-        // Extra carries a pattern (stripes, hatching or a cross), which matched does not share.
-        expect(hud['--extra-bg'], `${id} extra`).toMatch(/gradient\(/);
-        expect(hud['--extra-bg']).not.toBe(match);
-      }
+  it('is at least 3 to 1 for the star shapes, which are not lettering', () => {
+    for (const background of [...pageColours, hud['--surface']]) {
+      expect(contrast(hud['--star-line'], background), `star outline on ${background}`).toBeGreaterThanOrEqual(3);
+    }
+    expect(contrast(hud['--surface'], hud['--ink']), 'star outline on a filled button').toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('the fonts', () => {
+  it('are bundled files, never another site`s', () => {
+    expect(THEME.fonts.length).toBeGreaterThan(0);
+    for (const font of THEME.fonts) {
+      expect(font.url, font.family).toMatch(/\/fonts\/[a-z-]+\/[a-z0-9-]+\.woff2$/);
+      expect(font.url).not.toMatch(/^https?:/);
+      expect(hud['--font-body'] + hud['--font-display']).toContain(font.family);
     }
   });
 
-  it('paint their walls and floors in code', () => {
-    for (const { id, scene } of directions) {
-      expect(scene.walls.style, id).toBe('drawn');
-      expect(scene.floor.style, id).toBe('drawn');
+  it('each have their licence beside them', () => {
+    for (const font of THEME.fonts) {
+      const folder = /\/fonts\/([a-z-]+)\//.exec(font.url)?.[1] ?? '';
+      expect(LICENCES[folder], font.family).toContain('SIL OPEN FONT LICENSE Version 1.1');
     }
   });
 });
 
-describe('isThemeId', () => {
-  it('accepts the known ids and nothing else', () => {
-    for (const id of THEME_IDS) expect(isThemeId(id)).toBe(true);
-    for (const other of ['', 'Plain', 'dark', null, undefined, 3]) expect(isThemeId(other), String(other)).toBe(false);
+describe('the board', () => {
+  const { blocks } = THEME.scene;
+
+  it('has several tones of wood, and keeps the lamp tint subtle', () => {
+    expect(blocks.tones.length).toBeGreaterThan(1);
+    expect(blocks.lampTint.amount).toBeGreaterThan(0);
+    expect(blocks.lampTint.amount).toBeLessThanOrEqual(0.15);
+  });
+
+  it('shows a floating block by more than its colour: smaller and lifted', () => {
+    expect(blocks.floating.scale).toBeLessThan(blocks.scale);
+    expect(blocks.floating.lift).toBeGreaterThan(0);
+  });
+
+  it('marks extra shadow with strokes, and the target with a dashed outline', () => {
+    const { wall } = THEME.paint;
+    expect(wall.extra.stroke.weight).toBeGreaterThan(0);
+    expect(wall.outline.dash).toBeGreaterThan(0);
+    expect(wall.outline.gap).toBeGreaterThan(0);
+  });
+
+  it('lets the paper show through a shadow', () => {
+    expect(THEME.paint.wall.shadow.alpha).toBeLessThan(1);
+    expect(THEME.paint.wall.shadow.alpha).toBeGreaterThan(0.5);
   });
 });
 
-describe('toneIndex', () => {
-  it('always gives the same tone to the same cell', () => {
-    expect(toneIndex('1,2,3', 4)).toBe(toneIndex('1,2,3', 4));
+describe('pickFor', () => {
+  it('always gives the same choice to the same cell', () => {
+    expect(pickFor('1,2,3', 4)).toBe(pickFor('1,2,3', 4));
   });
 
-  it('stays inside the tones there are, and uses all of them', () => {
+  it('stays inside the choices there are, and uses all of them', () => {
     const used = new Set<number>();
     for (let x = 0; x < 5; x++) {
       for (let y = 0; y < 5; y++) {
         for (let z = 0; z < 5; z++) {
-          const index = toneIndex(`${x},${y},${z}`, 4);
+          const index = pickFor(`${x},${y},${z}`, 4);
           expect(index).toBeGreaterThanOrEqual(0);
           expect(index).toBeLessThan(4);
           used.add(index);
@@ -128,6 +150,11 @@ describe('toneIndex', () => {
       }
     }
     expect([...used].sort()).toEqual([0, 1, 2, 3]);
-    expect(toneIndex('0,0,0', 1)).toBe(0);
+    expect(pickFor('0,0,0', 1)).toBe(0);
+  });
+
+  it('gives a different spread with a different salt', () => {
+    const cells = Array.from({ length: 40 }, (_, index) => `${index % 5},${index % 3},${index % 4}`);
+    expect(cells.map((cell) => pickFor(cell, 3))).not.toEqual(cells.map((cell) => pickFor(cell, 3, 7)));
   });
 });
