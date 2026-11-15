@@ -12,8 +12,6 @@ export type Submission = {
   blocks: number;
   par: number;
   stars: Stars;
-  /** Seconds from first opening the puzzle to submitting, when known. */
-  seconds: number | null;
   /** The submitted sculpture, as "x,y,z" keys. */
   sculpture: string[];
 };
@@ -40,6 +38,49 @@ export type SubmitResponse =
   /** `accepted` the first time; `already-submitted` returns the stored result unchanged. */
   | { status: 'accepted' | 'already-submitted'; submission: Submission }
   | { status: 'rejected'; reason: SubmitRejection; message: string };
+
+/** One line of a post's leaderboard. */
+export type LeaderboardRow = {
+  /** 1 for the fewest blocks. Players with the same block count share a rank. */
+  rank: number;
+  username: string;
+  blocks: number;
+  /** True on the caller's own row. */
+  you: boolean;
+};
+
+/** Everything the result card shows for one player on one post. */
+export type Result = {
+  blocks: number;
+  par: number;
+  stars: Stars;
+  rank: number;
+  /** How many players hold that rank, the caller included. */
+  tied: number;
+  /** How many players have submitted for this post. */
+  solvers: number;
+  /** The first rows of the leaderboard, best first. */
+  leaderboard: LeaderboardRow[];
+  /** The caller's row when it is not among `leaderboard`, otherwise null. */
+  own: LeaderboardRow | null;
+  /** The fewest blocks anyone has submitted for this post so far. */
+  record: { blocks: number; underPar: boolean };
+  rarity: {
+    /** Solvers who built exactly this sculpture, the caller included. */
+    same: number;
+    /** `same` as a share of all solvers, from 0 to 1. */
+    share: number;
+    /** True when there are too few solvers for the share to mean anything. */
+    smallSample: boolean;
+  };
+  /** Daily puzzles in a row. `current` is 0 once the latest finished one was missed. */
+  streak: { current: number; best: number };
+};
+
+/** Response of GET /api/result. Only a player who has submitted gets the data. */
+export type ResultResponse =
+  | { status: 'ok'; result: Result }
+  | { status: 'not-submitted'; message: string };
 
 /**
  * TEMPORARY: response of GET /api/debug/puzzle/:number, which exists only in
@@ -120,13 +161,10 @@ export const parseQueuedPuzzle = (value: unknown): QueuedPuzzle | null => {
 
 export const parseSubmission = (value: unknown): Submission | null => {
   if (!isRecord(value)) return null;
-  const { blocks, par, stars, seconds, sculpture } = value;
+  const { blocks, par, stars, sculpture } = value;
   if (!isCount(blocks) || !isCount(par) || !isStars(stars)) return null;
-  if (seconds !== null && !(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0)) {
-    return null;
-  }
   if (!isBlockKeys(sculpture)) return null;
-  return { blocks, par, stars, seconds, sculpture: [...sculpture] };
+  return { blocks, par, stars, sculpture: [...sculpture] };
 };
 
 export const parsePuzzleResponse = (value: unknown): PuzzleResponse | null => {
@@ -164,6 +202,61 @@ export const parseSubmitResponse = (value: unknown): SubmitResponse | null => {
     return { status, reason: value.reason, message: value.message };
   }
   return null;
+};
+
+const parseLeaderboardRow = (value: unknown): LeaderboardRow | null => {
+  if (!isRecord(value)) return null;
+  const { rank, username, blocks, you } = value;
+  if (!isCount(rank) || rank < 1 || !isCount(blocks)) return null;
+  if (typeof username !== 'string' || typeof you !== 'boolean') return null;
+  return { rank, username, blocks, you };
+};
+
+const parseResult = (value: unknown): Result | null => {
+  if (!isRecord(value)) return null;
+  const { blocks, par, stars, rank, tied, solvers, leaderboard, record, rarity, streak } = value;
+  if (!isCount(blocks) || !isCount(par) || !isStars(stars)) return null;
+  if (!isCount(rank) || rank < 1 || !isCount(tied) || tied < 1 || !isCount(solvers) || solvers < 1) return null;
+
+  if (!Array.isArray(leaderboard)) return null;
+  const rows: LeaderboardRow[] = [];
+  for (const entry of leaderboard) {
+    const row = parseLeaderboardRow(entry);
+    if (!row) return null;
+    rows.push(row);
+  }
+  const own = value.own === null ? null : parseLeaderboardRow(value.own);
+  if (value.own !== null && !own) return null;
+
+  if (!isRecord(record) || !isCount(record.blocks) || typeof record.underPar !== 'boolean') return null;
+  if (!isRecord(rarity) || !isCount(rarity.same) || typeof rarity.smallSample !== 'boolean') return null;
+  const { share } = rarity;
+  if (typeof share !== 'number' || !(share >= 0 && share <= 1)) return null;
+  if (!isRecord(streak) || !isCount(streak.current) || !isCount(streak.best)) return null;
+
+  return {
+    blocks,
+    par,
+    stars,
+    rank,
+    tied,
+    solvers,
+    leaderboard: rows,
+    own,
+    record: { blocks: record.blocks, underPar: record.underPar },
+    rarity: { same: rarity.same, share, smallSample: rarity.smallSample },
+    streak: { current: streak.current, best: streak.best },
+  };
+};
+
+export const parseResultResponse = (value: unknown): ResultResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'not-submitted' && typeof value.message === 'string') {
+    return { status: 'not-submitted', message: value.message };
+  }
+  if (value.status !== 'ok') return null;
+  const result = parseResult(value.result);
+  return result ? { status: 'ok', result } : null;
 };
 
 export const parseDebugPuzzleResponse = (value: unknown): DebugPuzzleResponse | null => {

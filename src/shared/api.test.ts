@@ -3,6 +3,7 @@ import {
   MAX_BOARD_EDGE,
   parsePuzzle,
   parsePuzzleResponse,
+  parseResultResponse,
   parseSubmitRequest,
   parseSubmitResponse,
 } from './api';
@@ -92,7 +93,7 @@ describe('parsePuzzle', () => {
 });
 
 describe('parsePuzzleResponse', () => {
-  const submission = { blocks: 7, par: 6, stars: 2, seconds: 31, sculpture: ['0,0,0'] };
+  const submission = { blocks: 7, par: 6, stars: 2, sculpture: ['0,0,0'] };
   const response = (changes: Record<string, unknown>): unknown => ({
     puzzle: puzzleWith({}),
     canSubmit: true,
@@ -110,10 +111,10 @@ describe('parsePuzzleResponse', () => {
     });
   });
 
-  it('accepts a stored submission, with or without a time', () => {
+  it('accepts a stored submission, keeping only the fields it knows', () => {
     expect(parsePuzzleResponse(response({ submission }))?.submission).toEqual(submission);
-    const untimed = { ...submission, seconds: null };
-    expect(parsePuzzleResponse(response({ submission: untimed }))?.submission).toEqual(untimed);
+    const withExtra = { ...submission, seconds: 31, userId: 't2_someone' };
+    expect(parsePuzzleResponse(response({ submission: withExtra }))?.submission).toEqual(submission);
   });
 
   it('rejects a missing flag, a bad puzzle, a bad submission, or an error body', () => {
@@ -172,7 +173,7 @@ describe('parseSubmitRequest', () => {
 });
 
 describe('parseSubmitResponse', () => {
-  const submission = { blocks: 7, par: 6, stars: 2, seconds: null, sculpture: ['0,0,0'] };
+  const submission = { blocks: 7, par: 6, stars: 2, sculpture: ['0,0,0'] };
 
   it('accepts both success statuses', () => {
     expect(parseSubmitResponse({ status: 'accepted', submission })).toEqual({ status: 'accepted', submission });
@@ -190,5 +191,67 @@ describe('parseSubmitResponse', () => {
     expect(parseSubmitResponse({ status: 'rejected', reason: 'because', message: '' })).toBeNull();
     expect(parseSubmitResponse({ status: 'rejected', reason: 'malformed' })).toBeNull();
     expect(parseSubmitResponse(null)).toBeNull();
+  });
+});
+
+describe('parseResultResponse', () => {
+  const row = { rank: 1, username: 'ann', blocks: 7, you: false };
+  const result = {
+    blocks: 9,
+    par: 7,
+    stars: 2,
+    rank: 3,
+    tied: 2,
+    solvers: 40,
+    leaderboard: [row, { ...row, username: 'bea' }],
+    own: { rank: 3, username: 'me', blocks: 9, you: true },
+    record: { blocks: 7, underPar: false },
+    rarity: { same: 4, share: 0.1, smallSample: false },
+    streak: { current: 2, best: 5 },
+  };
+  const ok = (changes: Record<string, unknown>): unknown => ({ status: 'ok', result: { ...result, ...changes } });
+
+  it('accepts a full result, with or without a separate own row', () => {
+    expect(parseResultResponse(ok({}))).toEqual({ status: 'ok', result });
+    expect(parseResultResponse(ok({ own: null }))).toEqual({ status: 'ok', result: { ...result, own: null } });
+    expect(parseResultResponse(ok({ leaderboard: [] }))).not.toBeNull();
+  });
+
+  it('accepts the not-yet-submitted answer', () => {
+    const refusal = { status: 'not-submitted', message: 'Submit your solution to see the results.' };
+    expect(parseResultResponse(refusal)).toEqual(refusal);
+  });
+
+  it('keeps only the fields it knows', () => {
+    const parsed = parseResultResponse(ok({ leaderboard: [{ ...row, sculpture: '0,0,0', userId: 't2_ann' }] }));
+    expect(parsed).toEqual({ status: 'ok', result: { ...result, leaderboard: [row] } });
+  });
+
+  it('rejects a result with a bad or missing part', () => {
+    const bad: Record<string, unknown>[] = [
+      { stars: 4 },
+      { rank: 0 },
+      { tied: 0 },
+      { solvers: 0 },
+      { leaderboard: 'ann' },
+      { leaderboard: [{ ...row, rank: 0 }] },
+      { leaderboard: [{ ...row, username: 7 }] },
+      { leaderboard: [{ ...row, you: 'yes' }] },
+      { own: undefined },
+      { own: { rank: 3 } },
+      { record: { blocks: 7 } },
+      { rarity: { same: 4, share: 1.5, smallSample: false } },
+      { rarity: { same: 4, share: 0.1 } },
+      { streak: { current: -1, best: 5 } },
+      { streak: undefined },
+    ];
+    for (const changes of bad) expect(parseResultResponse(ok(changes)), JSON.stringify(changes)).toBeNull();
+  });
+
+  it('rejects other bodies', () => {
+    expect(parseResultResponse({ status: 'ok' })).toBeNull();
+    expect(parseResultResponse({ status: 'not-submitted' })).toBeNull();
+    expect(parseResultResponse({ status: 'error', message: 'This post has no puzzle.' })).toBeNull();
+    expect(parseResultResponse(null)).toBeNull();
   });
 });

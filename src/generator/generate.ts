@@ -17,7 +17,7 @@ import {
   toKey,
   type Grid,
 } from '../shared/logic';
-import type { QueuedPuzzle, Size, Tier } from '../shared/puzzle';
+import { WEEKDAY_TIERS, type QueuedPuzzle, type Size, type Tier } from '../shared/puzzle';
 import { createRandom, type Random } from '../shared/random';
 import { sortBlocks } from '../shared/score';
 import {
@@ -91,8 +91,8 @@ export const TIER_SETTINGS: Record<Tier, TierSettings> = {
   },
 };
 
-/** Tier for each day of the week, Monday first. Puzzle 1 is a Monday. */
-export const WEEK_PATTERN: readonly Tier[] = [1, 1, 2, 2, 3, 3, 3];
+// The queue cycles through WEEKDAY_TIERS (src/shared/puzzle.ts), Monday first,
+// so every tier gets its share of puzzles. The server picks by tier, not by number.
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 export type GeneratorOptions = {
@@ -413,7 +413,7 @@ const emptyReport = (): TierReport => ({
   },
 });
 
-export const tierForNumber = (number: number): Tier => WEEK_PATTERN[(number - 1) % 7] ?? 1;
+export const tierForNumber = (number: number): Tier => WEEKDAY_TIERS[(number - 1) % 7] ?? 1;
 
 /** Generates puzzles 1 to `count`. A shorter run gives a prefix of a longer one. */
 export const generateQueue = (overrides: Partial<GeneratorOptions> = {}): Generation => {

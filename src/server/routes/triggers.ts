@@ -1,20 +1,18 @@
 import { Hono } from 'hono';
-import type { OnAppInstallRequest, TriggerResponse } from '@devvit/web/shared';
+import type { TriggerResponse } from '@devvit/web/shared';
 import { context } from '@devvit/web/server';
-import { createNextPost } from '../core/posts';
+import { createDailyPost } from '../core/posts';
 
 export const triggers = new Hono();
 
-// Installing the app creates the first post, which is puzzle 1 on a fresh install.
+// Installing the app creates the first post straight away, whatever the hour.
+// It counts as that date's daily post, so the scheduled job skips the rest of
+// the day, and calling this route again on the same date does nothing.
 triggers.post('/on-app-install', async (c) => {
   try {
-    const { postId, number } = await createNextPost();
-    const input = await c.req.json<OnAppInstallRequest>();
+    const outcome = await createDailyPost(new Date());
     return c.json<TriggerResponse>(
-      {
-        status: 'success',
-        message: `Puzzle ${number} posted in r/${context.subredditName} as ${postId} (trigger: ${input.type})`,
-      },
+      { status: 'success', message: `Install post in r/${context.subredditName}: ${outcome}` },
       200
     );
   } catch (error) {

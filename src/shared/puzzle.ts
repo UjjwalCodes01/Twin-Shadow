@@ -26,6 +26,16 @@ export type QueuedPuzzle = Puzzle & {
   parIsOptimal: boolean;
 };
 
+/**
+ * Difficulty for each weekday, Monday first. The one place this mapping lives:
+ * the generator builds the queue in this pattern and the server picks each
+ * post's puzzle from the tier for its UTC weekday.
+ */
+export const WEEKDAY_TIERS: readonly Tier[] = [1, 1, 2, 2, 3, 3, 3];
+
+/** The tier for the UTC weekday of `date`. */
+export const tierForDate = (date: Date): Tier => WEEKDAY_TIERS[(date.getUTCDay() + 6) % 7] ?? 1;
+
 export const TEST_PUZZLE: Puzzle = {
   id: 'proto-1',
   number: 0,

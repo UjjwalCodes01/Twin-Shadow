@@ -1,51 +1,49 @@
 import { Hono } from 'hono';
-import { context } from '@devvit/web/server';
+import { context, reddit } from '@devvit/web/server';
 import type {
   DebugPuzzleResponse,
   PuzzleResponse,
+  ResultResponse,
   SubmitRejection,
   SubmitResponse,
 } from '../../shared/api';
 import { parseSubmitRequest } from '../../shared/api';
 import { isSolved } from '../../shared/logic';
-import type { Puzzle } from '../../shared/puzzle';
 import { isDevSubreddit } from '../core/dev';
-import { puzzleNumberForPost } from '../core/posts';
+import { loadPost, type PostRecord } from '../core/posts';
 import { QUEUE, puzzleByNumber } from '../core/queue';
-import { getSubmission, recordFirstLoad, storeSubmission } from '../core/submissions';
+import { acceptSubmission, buildResult } from '../core/scores';
+import { getStored, getSubmission } from '../core/submissions';
 
 // Mounted at /api in index.ts, so every route here starts with /api/.
 export const api = new Hono();
 
-/** The puzzle tied to the post this request comes from. */
-const puzzleForCurrentPost = async (): Promise<Puzzle | undefined> => {
-  const { postId, postData } = context;
-  if (!postId) return undefined;
-  const number = await puzzleNumberForPost(postId, postData);
-  return number === undefined ? undefined : puzzleByNumber(number);
+const NO_PUZZLE = 'This post has no puzzle.';
+
+/** The saved record of the post this request comes from, with its own puzzle copy. */
+const currentPost = async (): Promise<{ postId: string; post: PostRecord } | null> => {
+  const { postId } = context;
+  if (!postId) return null;
+  const post = await loadPost(postId);
+  return post ? { postId, post } : null;
 };
 
 api.get('/puzzle', async (c) => {
-  const { postId, userId, subredditName } = context;
-  const puzzle = await puzzleForCurrentPost();
-  if (!postId || !puzzle) {
-    return c.json({ status: 'error', message: 'This post has no puzzle.' }, 404);
-  }
-  let submission: PuzzleResponse['submission'] = null;
-  if (userId) {
-    await recordFirstLoad(postId, userId, Date.now());
-    submission = await getSubmission(postId, userId, puzzle);
-  }
+  const { userId, subredditName } = context;
+  const current = await currentPost();
+  if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  const { puzzle } = current.post;
   return c.json<PuzzleResponse>({
     puzzle,
     canSubmit: userId !== undefined,
-    submission,
+    // Read with the caller's own id, so nobody receives another player's sculpture.
+    submission: userId ? await getSubmission(current.postId, userId, puzzle) : null,
     debug: isDevSubreddit(subredditName),
   });
 });
 
 const REJECTIONS: Record<SubmitRejection, { status: 400 | 401 | 404 | 422; message: string }> = {
-  'no-puzzle': { status: 404, message: 'This post has no puzzle.' },
+  'no-puzzle': { status: 404, message: NO_PUZZLE },
   'logged-out': { status: 401, message: 'Log in to submit your solution.' },
   'malformed': { status: 400, message: 'That submission could not be read.' },
   'not-solved': { status: 422, message: 'That sculpture does not solve the puzzle.' },
@@ -57,25 +55,49 @@ api.post('/submit', async (c) => {
     return c.json<SubmitResponse>({ status: 'rejected', reason, message }, status);
   };
 
-  const { postId, userId } = context;
-  const puzzle = await puzzleForCurrentPost();
-  if (!postId || !puzzle) return reject('no-puzzle');
+  const { userId } = context;
+  const current = await currentPost();
+  if (!current) return reject('no-puzzle');
   if (!userId) return reject('logged-out');
+  const { postId, post } = current;
 
   const body: unknown = await c.req.json().catch(() => null);
-  const request = parseSubmitRequest(body, puzzle.size);
+  const request = parseSubmitRequest(body, post.puzzle.size);
   if (!request) return reject('malformed');
 
   // Only the first submission counts. A later attempt, valid or not, gets the
   // stored result back and changes nothing.
-  const existing = await getSubmission(postId, userId, puzzle);
+  const existing = await getSubmission(postId, userId, post.puzzle);
   if (existing) return c.json<SubmitResponse>({ status: 'already-submitted', submission: existing });
 
   // The server decides whether it is solved. Nothing the client claims is used.
-  if (!isSolved(new Set(request.blocks), puzzle)) return reject('not-solved');
+  if (!isSolved(new Set(request.blocks), post.puzzle)) return reject('not-solved');
 
-  const result = await storeSubmission(postId, userId, puzzle, request.blocks, Date.now());
-  return c.json<SubmitResponse>(result);
+  const username = context.username ?? (await reddit.getCurrentUsername()) ?? 'unknown';
+  const { status, submission } = await acceptSubmission(
+    postId,
+    post,
+    { userId, username },
+    request.blocks,
+    Date.now()
+  );
+  return c.json<SubmitResponse>({ status, submission });
+});
+
+// Results are only for players who have submitted, so nobody can read the
+// leaderboard or the record before solving.
+api.get('/result', async (c) => {
+  const { userId } = context;
+  const current = await currentPost();
+  if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  const stored = userId ? await getStored(current.postId, userId) : null;
+  if (!stored) {
+    return c.json<ResultResponse>(
+      { status: 'not-submitted', message: 'Submit your solution to see the results.' },
+      403
+    );
+  }
+  return c.json<ResultResponse>({ status: 'ok', result: await buildResult(current.post, stored) });
 });
 
 // TEMPORARY: lets the dev subreddit play any puzzle in the queue. Anywhere

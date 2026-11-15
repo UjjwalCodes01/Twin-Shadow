@@ -1,5 +1,5 @@
 import { parsePuzzle, parseQueuedPuzzle } from '../../shared/api';
-import type { Puzzle, QueuedPuzzle } from '../../shared/puzzle';
+import type { Puzzle, QueuedPuzzle, Tier } from '../../shared/puzzle';
 // Written by `npm run generate`. Holds silhouettes and par only: the seed
 // sculptures and par solutions live in src/generator/data and are never
 // imported here.
@@ -24,3 +24,7 @@ const FOR_PLAYERS: readonly Puzzle[] = QUEUE.flatMap((entry) => {
 /** The player-facing puzzle with this number, if the queue has one. */
 export const puzzleByNumber = (number: number): Puzzle | undefined =>
   Number.isInteger(number) ? FOR_PLAYERS[number - 1] : undefined;
+
+/** The player-facing puzzles of one tier, in queue order. */
+export const puzzlesOfTier = (tier: Tier): readonly Puzzle[] =>
+  FOR_PLAYERS.filter((puzzle) => puzzle.tier === tier);

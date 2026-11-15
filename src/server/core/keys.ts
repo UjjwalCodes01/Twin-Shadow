@@ -1,24 +1,62 @@
 // Every Redis key the app uses, in one place.
 
+import type { Tier } from '../../shared/puzzle';
+
 export const KEYS = {
   /**
    * String, a whole number: how many posts this installation has created.
-   * The next post takes the puzzle after that, wrapping at the end of the queue.
+   * It is the N in "Twin Shadows #N".
    */
   postCounter: 'posts:created',
 
-  /** String: the puzzle number tied to one post. A backup for the post's own post data. */
-  postPuzzle: (postId: string): string => `post:${postId}:puzzle`,
+  /**
+   * String, a whole number: how many posts have been given a puzzle of this
+   * tier. The next post of that tier takes the following one, wrapping at the
+   * end of the tier.
+   */
+  tierCounter: (tier: Tier): string => `posts:tier:${tier}`,
 
   /**
-   * Hash, UTC date (YYYY-MM-DD) -> post id: the post created on each date.
-   * Holds 'pending' for a moment while the daily job is creating one.
+   * String, a whole number: how many daily posts have been created. A daily
+   * post stores the value it got here, and streaks count those values.
+   */
+  dailyCounter: 'posts:daily',
+
+  /**
+   * String, JSON: everything fixed about one post: its number, whether it is
+   * a daily post, its date and its own copy of the puzzle. Routes read the
+   * puzzle from here, never from the queue file.
+   */
+  post: (postId: string): string => `post:${postId}`,
+
+  /**
+   * Hash, UTC date (YYYY-MM-DD) -> the id of that date's daily post. Holds
+   * 'pending:<milliseconds>' while a run is creating the post.
    */
   postDates: 'posts:by-date',
+
+  /**
+   * Hash, '<date>|<stale claim>' -> milliseconds: which run took over a claim
+   * that was left pending. One field per stale claim, so only one run can.
+   */
+  takeovers: 'posts:takeovers',
 
   /** Hash, user id -> JSON: each player's one counted submission for a post. */
   submissions: (postId: string): string => `post:${postId}:submissions`,
 
-  /** Hash, user id -> milliseconds: when each player first loaded a post's puzzle. */
-  firstLoads: (postId: string): string => `post:${postId}:first-loads`,
+  /**
+   * Sorted set, member user id: a post's leaderboard. The score is the block
+   * count with the submission time as tie-break, so fewer blocks come first
+   * and, among equal counts, earlier submissions come first.
+   */
+  leaderboard: (postId: string): string => `post:${postId}:leaderboard`,
+
+  /** Hash, block count -> how many players submitted that many blocks for a post. */
+  blockCounts: (postId: string): string => `post:${postId}:block-counts`,
+
+  /** Hash, short hash of a sculpture -> how many players submitted exactly that one. */
+  sculptures: (postId: string): string => `post:${postId}:sculptures`,
+
+  /** Hash, user id -> JSON: each player's current streak, best streak and last daily post counted. */
+  streaks: 'streaks',
 } as const;

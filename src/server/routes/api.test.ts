@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseDebugPuzzleResponse,
@@ -6,11 +5,13 @@ import {
   parseSubmitResponse,
   type SubmitResponse,
 } from '../../shared/api';
-import { findFloating, parseSilhouette, projectFront, projectSide, toKey } from '../../shared/logic';
+import { findFloating, parseSilhouette, projectFront, projectSide } from '../../shared/logic';
+import { TEST_PUZZLE, TEST_SOLUTION } from '../../shared/puzzle';
 import { canonicalSculpture } from '../../shared/score';
 import { isDevSubreddit } from '../core/dev';
 import { KEYS } from '../core/keys';
-import { QUEUE, puzzleByNumber } from '../core/queue';
+import { QUEUE, puzzleByNumber, puzzlesOfTier } from '../core/queue';
+import { floatingVariant, parSolution } from '../testing/solutions';
 
 // The Devvit runtime only exists inside Reddit, so stand in for it.
 const devvit = await vi.hoisted(async () => {
@@ -24,46 +25,8 @@ const { createNextPost } = await import('../core/posts');
 
 const ALICE = 't2_alice';
 const BOB = 't2_bob';
-
-/** A known solution for a queue puzzle, from the generator's own records. */
-const parSolution = (number: number): string[] => {
-  const all: unknown = JSON.parse(readFileSync('src/generator/data/solutions.json', 'utf8'));
-  if (!Array.isArray(all)) throw new Error('solutions.json is not an array');
-  const entry: unknown = all[number - 1];
-  if (typeof entry !== 'object' || entry === null || !('parSolution' in entry)) {
-    throw new Error(`No solution for puzzle ${number}`);
-  }
-  const { parSolution: blocks } = entry;
-  if (!Array.isArray(blocks) || !blocks.every((key) => typeof key === 'string')) {
-    throw new Error(`Bad solution for puzzle ${number}`);
-  }
-  return blocks;
-};
-
-/**
- * A queue puzzle and a sculpture for it that casts both target shadows but has
- * exactly one floating block.
- */
-const floatingVariant = (): { number: number; blocks: string[] } => {
-  for (const puzzle of QUEUE) {
-    const solution = parSolution(puzzle.number);
-    const used = new Set(solution);
-    const front = parseSilhouette(puzzle.front);
-    const side = parseSilhouette(puzzle.side);
-    for (let y = 1; y < puzzle.size.h; y++) {
-      for (let x = 0; x < puzzle.size.w; x++) {
-        for (let z = 0; z < puzzle.size.d; z++) {
-          const key = toKey(x, y, z);
-          if (used.has(key) || !front[y]?.[x] || !side[y]?.[z]) continue;
-          const candidate = [...solution, key];
-          const floating = findFloating(new Set(candidate));
-          if (floating.length === 1 && floating[0] === key) return { number: puzzle.number, blocks: candidate };
-        }
-      }
-    }
-  }
-  throw new Error('No puzzle in the queue has room for a shadow-neutral floating block');
-};
+// 2026-11-30 is a Monday, so these posts get tier 1 puzzles on a 4x4x4 board.
+const MONDAY = new Date('2026-11-30T12:00:00Z');
 
 const get = async (path: string): Promise<{ status: number; body: unknown }> => {
   const response = await api.request(path);
@@ -83,13 +46,13 @@ const submit = async (payload: unknown): Promise<{ status: number; body: SubmitR
   return { status: response.status, body };
 };
 
-/** Creates the next post and puts the request context inside it. */
-const openNewPost = async (userId: string | undefined) => {
-  const created = await createNextPost();
+/** Creates a post and puts the request context inside it. */
+const openNewPost = async (userId: string | undefined, now: Date = MONDAY) => {
+  const created = await createNextPost('manual', now);
   const post = devvit.posts.at(-1);
   if (!post) throw new Error('No post was created');
   devvit.enterPost(post, userId);
-  return created;
+  return { ...created, solution: parSolution(created.puzzle.number) };
 };
 
 const submissionsStored = (postId: string): Record<string, string> =>
@@ -98,68 +61,54 @@ const submissionsStored = (postId: string): Record<string, string> =>
 beforeEach(() => devvit.reset());
 
 describe('GET /api/puzzle', () => {
-  it('returns the puzzle tied to the post, passing the client`s validation', async () => {
-    await createNextPost();
-    await openNewPost(ALICE); // the second post, so puzzle 2
+  it('returns the puzzle saved with the post, passing the client`s validation', async () => {
+    await createNextPost('manual', MONDAY);
+    const { puzzle } = await openNewPost(ALICE); // the second Monday post
     const { status, body } = await get('/puzzle');
     expect(status).toBe(200);
     const parsed = parsePuzzleResponse(body);
-    expect(parsed?.puzzle).toEqual(puzzleByNumber(2));
+    expect(parsed?.puzzle).toEqual(puzzle);
+    expect(parsed?.puzzle).toEqual(puzzlesOfTier(1)[1]);
     expect(parsed?.canSubmit).toBe(true);
     expect(parsed?.submission).toBeNull();
   });
 
-  it('never sends parIsOptimal', async () => {
+  it('sends nothing but the player-facing fields', async () => {
     await openNewPost(ALICE);
     const { body } = await get('/puzzle');
     expect(JSON.stringify(body)).not.toContain('parIsOptimal');
+    expect(Object.keys(Object(body)).sort()).toEqual(['canSubmit', 'debug', 'puzzle', 'submission']);
+    expect(Object.keys(Object(parsePuzzleResponse(body)?.puzzle)).sort()).toEqual(
+      ['front', 'id', 'number', 'par', 'side', 'size', 'tier'].sort()
+    );
   });
 
-  it('finds the puzzle from Redis when the post data is missing', async () => {
-    await openNewPost(ALICE);
-    devvit.context.postData = undefined;
-    expect(parsePuzzleResponse((await get('/puzzle')).body)?.puzzle.number).toBe(1);
-  });
-
-  it('answers 404 for a post with no puzzle, and outside any post', async () => {
+  it('answers 404 for a post with no saved puzzle, and outside any post', async () => {
     devvit.context.postId = 't3_stranger';
+    expect((await get('/puzzle')).status).toBe(404);
+    // A post made by an older version only had a puzzle number.
+    await devvit.redis.set('post:t3_stranger:puzzle', '1');
     expect((await get('/puzzle')).status).toBe(404);
     devvit.context.postId = undefined;
     expect((await get('/puzzle')).status).toBe(404);
   });
 
   it('lets a logged-out player load the puzzle but marks submitting as off', async () => {
-    const { postId } = await openNewPost(undefined);
+    const { puzzle } = await openNewPost(undefined);
     const parsed = parsePuzzleResponse((await get('/puzzle')).body);
-    expect(parsed?.puzzle.number).toBe(1);
+    expect(parsed?.puzzle).toEqual(puzzle);
     expect(parsed?.canSubmit).toBe(false);
-    expect(devvit.hashContents(KEYS.firstLoads(postId))).toEqual({});
-  });
-
-  it('records the first load time once per player', async () => {
-    const { postId } = await openNewPost(ALICE);
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(1_000_000);
-      await get('/puzzle');
-      vi.setSystemTime(2_000_000);
-      await get('/puzzle');
-    } finally {
-      vi.useRealTimers();
-    }
-    expect(devvit.hashContents(KEYS.firstLoads(postId))).toEqual({ [ALICE]: '1000000' });
   });
 
   it('returns the stored submission to a returning player, and not to anyone else', async () => {
-    await openNewPost(ALICE);
-    await get('/puzzle');
-    const blocks = parSolution(1);
-    await submit({ blocks });
+    const { solution } = await openNewPost(ALICE);
+    await submit({ blocks: solution });
 
     const again = parsePuzzleResponse((await get('/puzzle')).body);
-    expect(again?.submission?.blocks).toBe(blocks.length);
+    expect(again?.submission?.blocks).toBe(solution.length);
     expect(again?.submission?.stars).toBe(3);
-    expect(canonicalSculpture(again?.submission?.sculpture ?? [])).toBe(canonicalSculpture(blocks));
+    expect(canonicalSculpture(again?.submission?.sculpture ?? [])).toBe(canonicalSculpture(solution));
+    expect(again?.submission).not.toHaveProperty('seconds');
 
     devvit.context.userId = BOB;
     expect(parsePuzzleResponse((await get('/puzzle')).body)?.submission).toBeNull();
@@ -173,17 +122,62 @@ describe('GET /api/puzzle', () => {
   });
 });
 
+describe('a post`s saved puzzle copy', () => {
+  it('is used for loading and for checking a submission, even for a puzzle the queue does not hold', async () => {
+    // Stands for a post whose puzzle has since been dropped from the queue file.
+    expect(QUEUE.some((puzzle) => puzzle.id === TEST_PUZZLE.id)).toBe(false);
+    const { postId } = await openNewPost(ALICE);
+    const saved = { number: 1, kind: 'manual', daily: null, date: '2026-11-30', puzzle: TEST_PUZZLE };
+    await devvit.redis.set(KEYS.post(postId), JSON.stringify(saved));
+
+    expect(parsePuzzleResponse((await get('/puzzle')).body)?.puzzle).toEqual(TEST_PUZZLE);
+    const result = await submit({ blocks: TEST_SOLUTION });
+    expect(result.body).toMatchObject({ status: 'accepted', submission: { blocks: 6, par: TEST_PUZZLE.par } });
+  });
+
+  it('stays the same after the queue file`s contents change', async () => {
+    const { puzzle, solution } = await openNewPost(ALICE);
+
+    // Load the server again with a different queue file: every puzzle moved
+    // one place along, so each number now names a different puzzle.
+    vi.resetModules();
+    const shifted = QUEUE.map((entry, index) => {
+      const source = QUEUE[(index + 7) % QUEUE.length];
+      return { ...source, number: entry.number, id: entry.id };
+    });
+    vi.doMock('../data/puzzles.json', () => ({ default: shifted }));
+    try {
+      const reloaded = await import('./api');
+      const queue = await import('../core/queue');
+      expect(queue.puzzleByNumber(puzzle.number)).not.toEqual(puzzle);
+
+      const response = await reloaded.api.request('/puzzle');
+      const body: unknown = await response.json();
+      expect(parsePuzzleResponse(body)?.puzzle).toEqual(puzzle);
+
+      // The old solution still counts, because the check uses the saved copy.
+      const sent = await reloaded.api.request('/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks: solution }),
+      });
+      const raw: unknown = await sent.json();
+      expect(parseSubmitResponse(raw)?.status).toBe('accepted');
+    } finally {
+      vi.doUnmock('../data/puzzles.json');
+      vi.resetModules();
+    }
+  });
+});
+
 describe('POST /api/submit', () => {
   it('stores a valid submission with everything the record needs', async () => {
-    const { postId } = await openNewPost(ALICE);
-    const blocks = parSolution(1);
+    const { postId, puzzle, solution } = await openNewPost(ALICE);
     vi.useFakeTimers();
     let result;
     try {
-      vi.setSystemTime(5_000_000);
-      await get('/puzzle'); // first load
-      vi.setSystemTime(5_042_400); // 42.4 seconds later
-      result = await submit({ blocks: [...blocks].reverse() });
+      vi.setSystemTime(5_042_400);
+      result = await submit({ blocks: [...solution].reverse() });
     } finally {
       vi.useRealTimers();
     }
@@ -191,90 +185,100 @@ describe('POST /api/submit', () => {
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({
       status: 'accepted',
-      submission: { blocks: blocks.length, par: QUEUE[0]?.par, stars: 3, seconds: 42 },
+      submission: { blocks: solution.length, par: puzzle.par, stars: 3 },
     });
+    expect(result.body).not.toHaveProperty('submission.seconds');
     const stored: unknown = JSON.parse(submissionsStored(postId)[ALICE] ?? 'null');
     expect(stored).toEqual({
       userId: ALICE,
+      username: 'alice',
       postId,
-      puzzleNumber: 1,
-      blocks: blocks.length,
+      puzzleId: puzzle.id,
+      blocks: solution.length,
       // Canonical: the same string whatever order the blocks arrived in.
-      sculpture: canonicalSculpture(blocks),
+      sculpture: canonicalSculpture(solution),
       submittedAt: 5_042_400,
-      seconds: 42,
     });
   });
 
   it('returns the first result for a second attempt and stores nothing new', async () => {
-    const { postId } = await openNewPost(ALICE);
-    const par = parSolution(1);
-    await submit({ blocks: par });
+    const { postId, solution } = await openNewPost(ALICE);
+    await submit({ blocks: solution });
     const before = submissionsStored(postId);
 
-    // A different, bigger valid solve: the par solution plus one covered block
-    // is not guaranteed valid, so resubmit the same blocks and an invalid set.
-    const second = await submit({ blocks: par });
+    const second = await submit({ blocks: solution });
     expect(second.status).toBe(200);
-    expect(second.body).toMatchObject({ status: 'already-submitted', submission: { blocks: par.length } });
+    expect(second.body).toMatchObject({ status: 'already-submitted', submission: { blocks: solution.length } });
     const third = await submit({ blocks: ['0,0,0'] });
-    expect(third.body).toMatchObject({ status: 'already-submitted', submission: { blocks: par.length } });
+    expect(third.body).toMatchObject({ status: 'already-submitted', submission: { blocks: solution.length } });
 
     expect(submissionsStored(postId)).toEqual(before);
     expect(Object.keys(submissionsStored(postId))).toEqual([ALICE]);
   });
 
   it('lets only one of two simultaneous submissions through', async () => {
-    const { postId } = await openNewPost(ALICE);
-    const blocks = parSolution(1);
-    const [a, b] = await Promise.all([submit({ blocks }), submit({ blocks })]);
+    const { postId, solution } = await openNewPost(ALICE);
+    const [a, b] = await Promise.all([submit({ blocks: solution }), submit({ blocks: solution })]);
     const statuses = [a.body.status, b.body.status].sort();
     expect(statuses).toEqual(['accepted', 'already-submitted']);
     expect(Object.keys(submissionsStored(postId))).toEqual([ALICE]);
   });
 
   it('keeps each player`s submission separate', async () => {
-    const { postId } = await openNewPost(ALICE);
-    await submit({ blocks: parSolution(1) });
+    const { postId, solution } = await openNewPost(ALICE);
+    await submit({ blocks: solution });
     devvit.context.userId = BOB;
-    expect((await submit({ blocks: parSolution(1) })).body.status).toBe('accepted');
-    expect(Object.keys(submissionsStored(postId)).sort()).toEqual([ALICE, BOB]);
+    devvit.context.username = 'bob';
+    expect((await submit({ blocks: solution, userId: ALICE })).body.status).toBe('accepted');
+    const stored = submissionsStored(postId);
+    expect(Object.keys(stored).sort()).toEqual([ALICE, BOB]);
+    expect(JSON.parse(stored[ALICE] ?? '{}')).toMatchObject({ userId: ALICE, username: 'alice' });
+    expect(JSON.parse(stored[BOB] ?? '{}')).toMatchObject({ userId: BOB, username: 'bob' });
   });
 
   it('checks against the post`s own puzzle, not the latest one', async () => {
     const first = await openNewPost(ALICE);
     const firstPost = devvit.posts.at(-1);
-    await openNewPost(ALICE); // now inside post 2
-    // Puzzle 1's solution does not solve puzzle 2.
-    expect((await submit({ blocks: parSolution(1) })).body).toMatchObject({ reason: 'not-solved' });
+    await openNewPost(ALICE); // now inside the second post
+    // The first puzzle's solution does not solve the second.
+    expect((await submit({ blocks: first.solution })).body).toMatchObject({ reason: 'not-solved' });
     if (!firstPost) throw new Error('No first post');
     devvit.enterPost(firstPost, ALICE);
-    expect((await submit({ blocks: parSolution(1) })).body.status).toBe('accepted');
+    expect((await submit({ blocks: first.solution })).body.status).toBe('accepted');
     expect(Object.keys(submissionsStored(first.postId))).toEqual([ALICE]);
   });
 
-  const rejected = async (payload: unknown, reason: string, status: number): Promise<void> => {
-    const { postId } = await openNewPost(ALICE);
-    const result = await submit(payload);
+  /** Sends one bad payload to a fresh post and checks it is refused and nothing is stored. */
+  const rejected = async (
+    payload: (solution: string[]) => unknown,
+    reason: string,
+    status: number
+  ): Promise<void> => {
+    devvit.reset();
+    const { postId, solution } = await openNewPost(ALICE);
+    const result = await submit(payload(solution));
     expect(result.status).toBe(status);
     expect(result.body).toMatchObject({ status: 'rejected', reason });
+    if (result.body.status === 'rejected') expect(result.body.message).not.toBe('');
     expect(submissionsStored(postId)).toEqual({});
+    expect(devvit.hashContents(KEYS.blockCounts(postId))).toEqual({});
+    expect(devvit.sortedSetMembers(KEYS.leaderboard(postId))).toEqual([]);
   };
 
   it('rejects an unsolved sculpture', async () => {
-    await rejected({ blocks: parSolution(1).slice(1) }, 'not-solved', 422);
-    devvit.reset();
-    await rejected({ blocks: [] }, 'not-solved', 422);
+    await rejected((solution) => ({ blocks: solution.slice(1) }), 'not-solved', 422);
+    await rejected(() => ({ blocks: [] }), 'not-solved', 422);
   });
 
   it('rejects a sculpture whose shadows match but which has a floating block', async () => {
-    // Take a real solution and add a block that changes neither shadow and
-    // touches nothing: the only thing wrong with it is that it floats.
-    const { number, blocks } = floatingVariant();
-    for (let created = 0; created < number - 1; created++) await createNextPost();
-    const { postId } = await openNewPost(ALICE);
-    const puzzle = puzzleByNumber(number);
-    if (!puzzle) throw new Error(`No puzzle ${number}`);
+    // A real solution plus one block that changes neither shadow and touches
+    // nothing: the only thing wrong with it is that it floats.
+    const monday = puzzlesOfTier(1);
+    const index = monday.findIndex((puzzle) => floatingVariant(puzzle) !== null);
+    expect(index).toBeGreaterThanOrEqual(0);
+    for (let created = 0; created < index; created++) await createNextPost('manual', MONDAY);
+    const { postId, puzzle } = await openNewPost(ALICE);
+    const blocks = floatingVariant(puzzle) ?? [];
     const built = new Set(blocks);
     expect(projectFront(built, puzzle.size)).toEqual(parseSilhouette(puzzle.front));
     expect(projectSide(built, puzzle.size)).toEqual(parseSilhouette(puzzle.side));
@@ -287,12 +291,11 @@ describe('POST /api/submit', () => {
   });
 
   it('rejects a block outside the board', async () => {
-    await rejected({ blocks: [...parSolution(1), '0,0,99'] }, 'not-solved', 422);
+    await rejected((solution) => ({ blocks: [...solution, '0,0,99'] }), 'not-solved', 422);
   });
 
   it('rejects duplicate blocks', async () => {
-    const blocks = parSolution(1);
-    await rejected({ blocks: [...blocks, blocks[0]] }, 'malformed', 400);
+    await rejected((solution) => ({ blocks: [...solution, solution[0]] }), 'malformed', 400);
   });
 
   it('rejects malformed requests', async () => {
@@ -309,19 +312,16 @@ describe('POST /api/submit', () => {
       'not json at all',
       null,
     ];
-    for (const payload of payloads) {
-      devvit.reset();
-      await rejected(payload, 'malformed', 400);
-    }
+    for (const payload of payloads) await rejected(() => payload, 'malformed', 400);
   });
 
-  it('ignores any solved flag or block count the client sends', async () => {
-    await rejected({ blocks: ['0,0,0'], solved: true, blockCount: 3, stars: 3 }, 'not-solved', 422);
+  it('ignores any solved flag, block count or star rating the client sends', async () => {
+    await rejected(() => ({ blocks: ['0,0,0'], solved: true, blockCount: 3, stars: 3 }), 'not-solved', 422);
   });
 
   it('refuses a logged-out submission', async () => {
-    const { postId } = await openNewPost(undefined);
-    const result = await submit({ blocks: parSolution(1) });
+    const { postId, solution } = await openNewPost(undefined);
+    const result = await submit({ blocks: solution });
     expect(result.status).toBe(401);
     expect(result.body).toMatchObject({ status: 'rejected', reason: 'logged-out' });
     expect(submissionsStored(postId)).toEqual({});
@@ -366,6 +366,16 @@ describe('the server`s queue', () => {
     expect(puzzleByNumber(1)?.number).toBe(1);
     expect(puzzleByNumber(0)).toBeUndefined();
     expect(puzzleByNumber(1)).not.toHaveProperty('parIsOptimal');
+  });
+
+  it('splits into tiers that together hold every puzzle', () => {
+    const tiers = [puzzlesOfTier(1), puzzlesOfTier(2), puzzlesOfTier(3)];
+    expect(tiers.map((tier) => tier.length).reduce((a, b) => a + b, 0)).toBe(QUEUE.length);
+    tiers.forEach((tier, index) => {
+      expect(tier.length).toBeGreaterThan(0);
+      expect(tier.every((puzzle) => puzzle.tier === index + 1)).toBe(true);
+      expect(tier[0]).not.toHaveProperty('parIsOptimal');
+    });
   });
 });
 
