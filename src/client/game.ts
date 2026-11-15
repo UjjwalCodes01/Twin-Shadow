@@ -22,6 +22,7 @@ import { journeys, NO_JOURNEY } from './journey';
 import { createResultCard, type ActionOutcome, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
+import { applyHudTheme, DEFAULT_THEME, isThemeId, THEME_IDS, THEMES, type Theme, type ThemeId } from './theme';
 
 const PUZZLE_URL = '/api/puzzle';
 const SUBMIT_URL = '/api/submit';
@@ -32,7 +33,12 @@ const JOIN_URL = '/api/join';
 
 /** 'missing' is a post with no puzzle saved for it: asking again cannot help, so there is no Retry. */
 type LoadState = 'loading' | 'ready' | 'error' | 'missing';
-type Game = { store: Store; scene: SceneHandle; stop: () => void };
+/** A running game, with what it was started from so it can be rebuilt in another theme. */
+type Game = { store: Store; scene: SceneHandle; stop: () => void; puzzle: Puzzle; options: GameOptions };
+
+// Every player gets the default theme. Debug mode can switch to another.
+let theme: Theme = DEFAULT_THEME;
+applyHudTheme(theme);
 
 type GameOptions = {
   blocks?: readonly string[];
@@ -189,7 +195,7 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
 
   const store = createStore(puzzle.size, options.blocks ?? []);
   if (options.rotation) store.rotate(options.rotation);
-  const scene = createScene(canvas, puzzle, store);
+  const scene = createScene(canvas, puzzle, store, theme);
   // The result card and the gallery lead to each other, so each gets a way
   // to open the other. A debug puzzle has neither.
   let card: ResultCard | null = null;
@@ -236,6 +242,8 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   game = {
     store,
     scene,
+    puzzle,
+    options,
     stop: () => {
       journey.stop();
       removeHud();
@@ -279,6 +287,38 @@ const loadQueuePuzzle = async (number: number, label: HTMLElement): Promise<void
   } catch (error) {
     console.error(`Could not load puzzle ${number}:`, error);
     label.textContent = `#${number} unavailable`;
+  }
+};
+
+// Themes other than the default are art directions still being chosen
+// between, so they can only be switched to from here: with the buttons on the
+// debug bar, or with ?theme=lamp|blueprint|night on the page address. The
+// choice is remembered on this device, and only ever applied in debug mode.
+const THEME_STORAGE_KEY = 'twin-shadows.debug-theme';
+
+const setTheme = (id: ThemeId): void => {
+  theme = THEMES[id];
+  applyHudTheme(theme);
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, id);
+  } catch {
+    // Storage can be unavailable; the theme then lasts for this visit only.
+  }
+  if (!game) return;
+  // Build the board again in the new theme, with the same blocks on it.
+  game.store.endView();
+  const { blocks, rotation } = game.store.getState();
+  startGame(game.puzzle, { ...game.options, blocks: [...blocks], rotation });
+};
+
+const debugThemeChoice = (): ThemeId | null => {
+  const fromAddress = new URLSearchParams(window.location.search).get('theme');
+  if (isThemeId(fromAddress)) return fromAddress;
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return isThemeId(saved) ? saved : null;
+  } catch {
+    return null;
   }
 };
 
@@ -326,9 +366,19 @@ const showDebugBar = (): void => {
     blocksInput.placeholder = `placed ${placed} of ${keys.length}`;
   });
   bar.append(blocksRow);
+
+  // Fourth row: the themes.
+  const themeRow = document.createElement('div');
+  themeRow.className = 'debug-queue';
+  for (const id of THEME_IDS) addButton(themeRow, THEMES[id].name, () => setTheme(id));
+  bar.append(themeRow);
+  const chosen = debugThemeChoice();
+  if (chosen && chosen !== theme.id) setTheme(chosen);
+
   Object.assign(window, {
     twinShadowsDebug: {
       load: loadDebugState,
+      setTheme,
       render: () => game?.scene.renderNow(),
       getState: () => game?.store.getState(),
     },

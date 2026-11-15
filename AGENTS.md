@@ -17,7 +17,8 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
   - `splash.html` / `splash.ts`: the inline view shown in the feed. Keep it light; no three.js here.
   - `game.html` / `game.ts`: the expanded view. Loads the puzzle and wires the parts together.
   - `store.ts`: the one game state store (blocks, rotation, mode, undo stack, read-only viewing mode). No DOM.
-  - `scene.ts`: the three.js board. Reads the store, never writes game state.
+  - `scene.ts`: the three.js board. Reads the store, never writes game state. Built from the theme it is given.
+  - `theme.ts`: every colour, material setting, line weight, font and corner radius, for the HUD and the board. `fonts/`: the bundled font files and their licences.
   - `input.ts`: tap handling. `hud.ts`: the HTML panels and controls. `result.ts`: the result card and its wording. `gallery.ts`: the list of other players' sculptures and the banner shown while viewing one. `journey.ts`: journey telemetry.
   - `debug.ts`: temporary debug board states.
 - `src/server/`: `routes/api.ts` (public `/api` routes: `GET /api/puzzle`, `POST /api/submit`, `GET /api/result`, `GET /api/gallery`, `POST /api/share`, `POST /api/join`), `routes/menu.ts`, `routes/triggers.ts` and `routes/scheduler.ts` (the three ways a post is made), `routes/telemetry.ts` (journey telemetry routes), `core/posts.ts` (post creation, each post's saved record and the daily job), `core/submissions.ts` (the one stored submission per player per post), `core/scores.ts` (leaderboard, rarity, gallery, streaks and the result), `core/flair.ts` (streak flair), `core/share.ts` (sharing a result as a comment, and the join prompt), `core/keys.ts` (every Redis key, documented), `core/queue.ts`, `data/puzzles.json` (generated puzzle queue), `testing/` (stand-ins for Redis, Reddit and context, and known solutions, for tests only).
@@ -46,6 +47,9 @@ A daily 3D puzzle that runs as an interactive post on Reddit (Devvit Web). The p
 - **New Redis keys go in `src/server/core/keys.ts`** with a comment saying what they hold.
 - Every server route the client calls must start with `/api/`. Menu and trigger routes are under `/internal/` and must be registered in `devvit.json`.
 - Coordinates: x runs left to right, y runs up from the floor, z runs front to back, all from 0. A sculpture is a `Set<string>` of `"x,y,z"` keys. Silhouettes are string arrays, top row first, `#` lit and `.` empty.
+- **Looks live in `src/client/theme.ts`.** `game.css` is layout only and names no colour, font, radius or line weight: it reads CSS variables listed in `HUD_VARIABLES`, and `scene.ts` takes its values from the theme's `scene` part. A new value means a new entry in the theme, never a literal in the stylesheet or the scene. `vite.config.ts` writes the default theme's variables into the built stylesheet, so keep `theme.ts` free of imports that run.
+- **Players get the `plain` theme.** `lamp`, `blueprint` and `night` are art directions still being chosen between. They can only be switched to in debug mode: the theme buttons on the debug bar, or `?theme=` on the address of a local build.
+- **Fonts are bundled, never fetched from another site**, and each sits in `src/client/fonts/` beside its licence. No image textures or outside artwork: walls and floors that are not flat shapes are painted in code on a canvas.
 - Code marked `TEMPORARY` is debug-only and is removed before release. Keep new debug code behind the same dev-subreddit check and mark it the same way.
 - The game itself has no Reddit theming: no Snoo, karma or subreddit references.
 - Add no dependencies without asking.

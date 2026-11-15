@@ -44,7 +44,7 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | Path | Contents |
 | --- | --- |
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
-| `src/client/` | The three.js board, tap input and the HTML controls |
+| `src/client/` | The three.js board, tap input, the HTML controls and the theme (all colours, fonts and materials). `fonts/` holds the bundled fonts with their licences |
 | `src/server/` | The Hono server: the puzzle, submit, result, gallery, share and join endpoints, post creation, the daily job, leaderboards, streaks and flair |
 | `src/generator/` | The offline puzzle generator, run with `npm run generate` |
 | `devvit.json` | App configuration: entry points, menu item, install trigger and the scheduled task |

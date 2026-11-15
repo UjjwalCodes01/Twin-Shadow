@@ -4,3 +4,6 @@ dist
 .env
 .doc
 .env.*
+
+# Screenshots of the art directions, made for review. Regenerated, not kept in git.
+/docs/themes/

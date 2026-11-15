@@ -1,22 +1,11 @@
-/* Placeholder styling. Art direction replaces this later. The two accents are
-   repeated in scene.ts for the walls: keep them in step. */
-:root {
-  --page: #e9e6df;
-  --ink: #26303d;
-  --ink-soft: #55606e;
-  --surface: #f6f3ec;
-  --line: #c9c3b6;
-  --front: #1f7a6d;
-  --side: #7a4fb0;
-  --extra: #d9483b;
-  --floating: #b26b00;
-}
-
+/* Layout only. Every colour, font, corner radius and line weight is a variable
+   whose value comes from src/client/theme.ts, which sets them on the root
+   element before anything is drawn. Nothing here names a colour. */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
 }
 
 [hidden] {
@@ -30,6 +19,12 @@ body {
   overflow: hidden;
   background: var(--page);
   color: var(--ink);
+}
+
+/* A theme may lay a pattern or a glow over the page colour. */
+body {
+  background-image: var(--page-image);
+  background-size: var(--page-size);
 }
 
 /* Portrait first: readout on top, board in the middle, controls in thumb reach. */
@@ -84,7 +79,7 @@ body {
   min-height: 44px;
   padding: 0 24px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--surface);
   font-size: 1rem;
@@ -105,6 +100,7 @@ body {
 }
 
 .viewing-owner {
+  font-family: var(--font-display);
   overflow: hidden;
   font-size: 0.95rem;
   font-weight: 700;
@@ -127,8 +123,8 @@ body {
 .viewing-actions button {
   min-height: 44px;
   padding: 0 6px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  border: var(--line-thin) solid var(--ink);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--ink);
   font-size: 0.85rem;
@@ -176,23 +172,34 @@ body:not([data-state='ready']) .controls {
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
-  border: 2px solid transparent;
-  border-radius: 8px;
+  border: var(--line-strong) solid transparent;
+  border-radius: var(--radius-control);
 }
 
 .panel.front {
   --accent: var(--front);
+  --match-bg: var(--front-match-bg);
+  --match-border: var(--front-match-border);
+  --match-shadow: var(--front-match-shadow);
+  --missing-bg: var(--front-missing-bg);
+  --missing-border: var(--front-missing-border);
 }
 
 .panel.side {
   --accent: var(--side);
+  --match-bg: var(--side-match-bg);
+  --match-border: var(--side-match-border);
+  --match-shadow: var(--side-match-shadow);
+  --missing-bg: var(--side-missing-bg);
+  --missing-border: var(--side-missing-border);
 }
 
 .panel-label {
+  font-family: var(--font-display);
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: var(--label-spacing);
+  text-transform: var(--label-case);
   color: var(--accent);
 }
 
@@ -210,24 +217,26 @@ body:not([data-state='ready']) .controls {
 }
 
 .cell {
-  border-radius: 2px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  border-radius: var(--radius-cell);
+  background: var(--cell-bg);
+  border: var(--cell-border);
 }
 
 .cell.match {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--match-bg);
+  border: var(--match-border);
+  box-shadow: var(--match-shadow);
 }
 
 .cell.missing {
-  background: transparent;
-  border: 2px solid var(--accent);
+  background: var(--missing-bg);
+  border: var(--missing-border);
 }
 
 .cell.extra {
-  background: var(--extra);
-  border-color: var(--extra);
+  background: var(--extra-bg);
+  border: var(--extra-border);
+  box-shadow: var(--extra-shadow);
 }
 
 .status {
@@ -242,7 +251,8 @@ body:not([data-state='ready']) .controls {
 }
 
 .block-count {
-  font-size: 1rem;
+  font-family: var(--font-display);
+  font-size: var(--count-size);
   font-weight: 700;
 }
 
@@ -264,7 +274,7 @@ body:not([data-state='ready']) .controls {
   min-height: 44px;
   padding: 0 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--surface);
   font-size: 0.85rem;
@@ -275,7 +285,7 @@ body:not([data-state='ready']) .controls {
 
 .submit:disabled {
   background: transparent;
-  border: 1px solid var(--line);
+  border: var(--line-thin) solid var(--line);
   color: var(--ink-soft);
   font-weight: 600;
   cursor: default;
@@ -297,7 +307,7 @@ body:not([data-state='ready']) .controls {
   min-height: 44px;
   padding: 0 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--surface);
   font-size: 0.85rem;
@@ -315,7 +325,7 @@ body:not([data-state='ready']) .controls {
   align-items: center;
   justify-content: center;
   padding: 12px;
-  background: rgb(38 48 61 / 55%);
+  background: var(--overlay);
 }
 
 .result-card {
@@ -326,7 +336,9 @@ body:not([data-state='ready']) .controls {
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px 16px;
-  border-radius: 12px;
+  border: var(--card-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
   background: var(--surface);
   color: var(--ink);
   text-align: center;
@@ -335,6 +347,7 @@ body:not([data-state='ready']) .controls {
 }
 
 .result-title {
+  font-family: var(--font-display);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -364,6 +377,7 @@ body:not([data-state='ready']) .controls {
 }
 
 .result-blocks {
+  font-family: var(--font-display);
   font-size: 1.05rem;
   font-weight: 700;
 }
@@ -371,14 +385,15 @@ body:not([data-state='ready']) .controls {
 .result-under {
   align-self: center;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--front);
-  color: #ffffff;
+  color: var(--on-strong);
   font-size: 0.8rem;
   font-weight: 700;
 }
 
 .result-rank {
+  font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -397,9 +412,9 @@ body:not([data-state='ready']) .controls {
   overflow-y: auto;
   overscroll-behavior: contain;
   list-style: none;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
+  border: var(--line-thin) solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--list-bg);
   text-align: left;
 }
 
@@ -415,7 +430,7 @@ body:not([data-state='ready']) .controls {
 }
 
 .result-row + .result-row {
-  border-top: 1px solid var(--page);
+  border-top: var(--line-thin) solid var(--page);
 }
 
 .result-row.you {
@@ -447,7 +462,7 @@ body:not([data-state='ready']) .controls {
   line-height: 14px;
   text-align: center;
   color: var(--ink-soft);
-  border-top: 1px solid var(--page);
+  border-top: var(--line-thin) solid var(--page);
 }
 
 .card-button,
@@ -455,8 +470,8 @@ body:not([data-state='ready']) .controls {
   flex: none;
   min-height: 48px;
   padding: 0 16px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  border: var(--line-thin) solid var(--ink);
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--surface);
   font-size: 1rem;
@@ -499,8 +514,8 @@ body:not([data-state='ready']) .controls {
   gap: 6px;
   margin-top: 6px;
   padding: 6px 6px 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: var(--line-thin) solid var(--line);
+  border-radius: var(--radius-control);
   text-align: left;
 }
 
@@ -515,8 +530,8 @@ body:not([data-state='ready']) .controls {
   flex: none;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  border: var(--line-thin) solid var(--ink);
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--surface);
   font-size: 0.9rem;
@@ -560,7 +575,7 @@ body:not([data-state='ready']) .controls {
 
 .gallery-sort button {
   min-height: 44px;
-  border: 1px solid var(--ink);
+  border: var(--line-thin) solid var(--ink);
   background: transparent;
   color: var(--ink);
   font-size: 0.9rem;
@@ -570,12 +585,12 @@ body:not([data-state='ready']) .controls {
 }
 
 .gallery-sort button:first-child {
-  border-radius: 8px 0 0 8px;
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
 }
 
 .gallery-sort button:last-child {
   border-left: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
 .gallery-sort button[aria-pressed='true'] {
@@ -595,7 +610,7 @@ body:not([data-state='ready']) .controls {
   min-height: 48px;
   padding: 6px 12px;
   border: none;
-  border-bottom: 1px solid var(--page);
+  border-bottom: var(--line-thin) solid var(--page);
   background: transparent;
   color: var(--ink);
   text-align: left;
@@ -653,8 +668,9 @@ body:not([data-state='ready']) .controls {
   min-width: 44px;
   min-height: 48px;
   padding: 0 4px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
+  border: var(--line-thin) solid var(--ink);
+  border-radius: var(--radius-control);
+  box-shadow: var(--control-shadow);
   background: var(--surface);
   color: var(--ink);
   font-size: 0.85rem;
@@ -676,7 +692,7 @@ body:not([data-state='ready']) .controls {
   margin: 0 auto;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: var(--icon-stroke);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -687,12 +703,12 @@ body:not([data-state='ready']) .controls {
 }
 
 .mode button:first-child {
-  border-radius: 8px 0 0 8px;
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
 }
 
 .mode button:last-child {
   border-left: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
 .mode button[aria-pressed='true'] {
@@ -710,7 +726,7 @@ body:not([data-state='ready']) .controls {
 #reset.armed {
   background: var(--extra);
   border-color: var(--extra);
-  color: #ffffff;
+  color: var(--on-strong);
 }
 
 .debug-bar {
@@ -742,8 +758,8 @@ body:not([data-state='ready']) .controls {
   min-width: 0;
   min-height: 44px;
   padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: var(--line-thin) solid var(--line);
+  border-radius: var(--radius-small);
   background: transparent;
   color: var(--ink);
   font: inherit;
