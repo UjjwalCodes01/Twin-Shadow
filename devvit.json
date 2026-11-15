@@ -44,6 +44,7 @@
     "dev": "vite build --watch"
   },
   "permissions": {
+    "journeys": true,
     "reddit": {
       "asUser": ["SUBMIT_COMMENT", "SUBSCRIBE_TO_SUBREDDIT"]
     }

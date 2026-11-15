@@ -18,6 +18,7 @@ import { DEBUG_STATES, debugSetup } from './debug';
 import { createGallery, type GalleryHandle } from './gallery';
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
+import { journeys, NO_JOURNEY } from './journey';
 import { createResultCard, type ActionOutcome, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
@@ -193,14 +194,41 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   // to open the other. A debug puzzle has neither.
   let card: ResultCard | null = null;
   let gallery: GalleryHandle | null = null;
+  // Journey telemetry watches the post's own puzzle only, never a debug one.
+  const journey = options.results
+    ? journeys.track(store, puzzle, { submitted: Boolean(options.submission) })
+    : NO_JOURNEY;
   if (options.results) {
     gallery = createGallery(store, { load: loadGallery, backToResult: () => card?.open() });
-    card = createResultCard({ load: loadResult, openGallery: () => gallery?.open(), share: shareResult, answerJoin });
+    card = createResultCard({
+      load: async () => {
+        const result = await loadResult();
+        if (result) journey.resultViewed();
+        return result;
+      },
+      openGallery: () => {
+        journey.galleryOpened();
+        gallery?.open();
+      },
+      share: async (tap) => {
+        const outcome = await shareResult(tap);
+        if (outcome === 'done') journey.resultShared();
+        return outcome;
+      },
+      answerJoin,
+    });
+    // Registered after the scene asked for its first frame, so this runs
+    // once that frame has been drawn.
+    requestAnimationFrame(() => journeys.boardDrawn());
   }
   const removeHud = createHud(puzzle, store, {
     submission: options.submission ?? null,
     submitBlocked: options.submitBlocked ?? null,
-    submit: submitSculpture,
+    submit: async (blocks) => {
+      const outcome = await submitSculpture(blocks);
+      if (outcome.ok) journey.submitted(outcome.submission.stars);
+      return outcome;
+    },
     openResult: card ? () => card?.open() : null,
   });
   attachInput(canvas, puzzle, store, scene);
@@ -209,6 +237,7 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
     store,
     scene,
     stop: () => {
+      journey.stop();
       removeHud();
       gallery?.dispose();
       card?.dispose();
