@@ -222,6 +222,25 @@ const showDebugBar = (): void => {
   queueRow.append(label);
   addButton(queueRow, 'next', () => void loadQueuePuzzle(queueNumber + 1, label));
   bar.append(queueRow);
+
+  // Third row: place a pasted list of blocks ("3,0,0 3,1,0 ...") on the
+  // current board, so a tester can reach a solved board without building it
+  // tap by tap. The store applies the usual rules to each block.
+  const blocksRow = document.createElement('div');
+  blocksRow.className = 'debug-queue';
+  const blocksInput = document.createElement('input');
+  blocksInput.type = 'text';
+  blocksInput.className = 'debug-blocks';
+  blocksInput.placeholder = 'blocks: 0,0,0 1,0,0';
+  blocksInput.setAttribute('aria-label', 'Blocks to place');
+  blocksRow.append(blocksInput);
+  addButton(blocksRow, 'place', () => {
+    const keys = blocksInput.value.match(/\d+,\d+,\d+/g) ?? [];
+    const placed = keys.filter((key) => game?.store.add(key) === true).length;
+    blocksInput.value = '';
+    blocksInput.placeholder = `placed ${placed} of ${keys.length}`;
+  });
+  bar.append(blocksRow);
   Object.assign(window, {
     twinShadowsDebug: {
       load: loadDebugState,
