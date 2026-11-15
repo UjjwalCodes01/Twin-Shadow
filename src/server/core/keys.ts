@@ -54,9 +54,28 @@ export const KEYS = {
   /** Hash, block count -> how many players submitted that many blocks for a post. */
   blockCounts: (postId: string): string => `post:${postId}:block-counts`,
 
-  /** Hash, short hash of a sculpture -> how many players submitted exactly that one. */
+  /**
+   * Hash, '<block count>:<short hash of a sculpture>' -> how many players
+   * submitted exactly that sculpture. One read gives all the gallery sorts by.
+   */
   sculptures: (postId: string): string => `post:${postId}:sculptures`,
 
-  /** Hash, user id -> JSON: each player's current streak, best streak and last daily post counted. */
+  /**
+   * Hash, short hash of a sculpture -> JSON: the sculpture itself and the
+   * first player to submit it. Written once per distinct sculpture.
+   */
+  gallery: (postId: string): string => `post:${postId}:gallery`,
+
+  /**
+   * Hash, '<step>:<user id>' -> '1': which of a player's submission has
+   * already been added to the leaderboard, the block-count tally and the
+   * sculpture counts. Each step is claimed here first, so it happens once.
+   */
+  counted: (postId: string): string => `post:${postId}:counted`,
+
+  /**
+   * Hash, user id -> JSON: each player's current streak, best streak, last
+   * daily post counted and the streak flair they have been given.
+   */
   streaks: 'streaks',
 } as const;

@@ -82,6 +82,42 @@ export type ResultResponse =
   | { status: 'ok'; result: Result }
   | { status: 'not-submitted'; message: string };
 
+export const GALLERY_SORTS = ['rarest', 'leanest'] as const;
+/** 'rarest': fewest builders first. 'leanest': fewest blocks first. */
+export type GallerySort = (typeof GALLERY_SORTS)[number];
+
+/** One distinct sculpture players have submitted for a post. */
+export type GalleryEntry = {
+  /** A short name for the sculpture, the same for everyone who built it. */
+  id: string;
+  blocks: number;
+  /** How many players submitted exactly this sculpture. */
+  builders: number;
+  /** The first player to submit it. */
+  first: string;
+  /** The sculpture, as "x,y,z" keys. */
+  sculpture: string[];
+  /** True on the sculpture the caller submitted. */
+  yours: boolean;
+};
+
+/** One page of a post's gallery. */
+export type Gallery = {
+  sort: GallerySort;
+  /** This page, from 1. */
+  page: number;
+  /** How many pages there are, at least 1. */
+  pages: number;
+  /** How many distinct sculptures the gallery holds. */
+  total: number;
+  entries: GalleryEntry[];
+};
+
+/** Response of GET /api/gallery. Like the result, only for a player who has submitted. */
+export type GalleryResponse =
+  | { status: 'ok'; gallery: Gallery }
+  | { status: 'not-submitted'; message: string };
+
 /**
  * TEMPORARY: response of GET /api/debug/puzzle/:number, which exists only in
  * the app's dev subreddit.
@@ -112,6 +148,9 @@ const isStars = (value: unknown): value is Stars => value === 1 || value === 2 |
 
 const isSubmitRejection = (value: unknown): value is SubmitRejection =>
   SUBMIT_REJECTIONS.some((reason) => reason === value);
+
+export const isGallerySort = (value: unknown): value is GallerySort =>
+  GALLERY_SORTS.some((sort) => sort === value);
 
 /** A block key: three whole numbers, no signs, no padding. */
 const BLOCK_KEY = /^(0|[1-9]\d*),(0|[1-9]\d*),(0|[1-9]\d*)$/;
@@ -257,6 +296,33 @@ export const parseResultResponse = (value: unknown): ResultResponse | null => {
   if (value.status !== 'ok') return null;
   const result = parseResult(value.result);
   return result ? { status: 'ok', result } : null;
+};
+
+const parseGalleryEntry = (value: unknown): GalleryEntry | null => {
+  if (!isRecord(value)) return null;
+  const { id, blocks, builders, first, sculpture, yours } = value;
+  if (typeof id !== 'string' || id === '' || typeof first !== 'string' || typeof yours !== 'boolean') return null;
+  if (!isCount(blocks) || !isCount(builders) || builders < 1) return null;
+  if (!isBlockKeys(sculpture)) return null;
+  return { id, blocks, builders, first, sculpture: [...sculpture], yours };
+};
+
+export const parseGalleryResponse = (value: unknown): GalleryResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'not-submitted' && typeof value.message === 'string') {
+    return { status: 'not-submitted', message: value.message };
+  }
+  if (value.status !== 'ok' || !isRecord(value.gallery)) return null;
+  const { sort, page, pages, total, entries } = value.gallery;
+  if (!isGallerySort(sort) || !isCount(page) || page < 1 || !isCount(pages) || pages < 1) return null;
+  if (!isCount(total) || !Array.isArray(entries)) return null;
+  const parsed: GalleryEntry[] = [];
+  for (const entry of entries) {
+    const row = parseGalleryEntry(entry);
+    if (!row) return null;
+    parsed.push(row);
+  }
+  return { status: 'ok', gallery: { sort, page, pages, total, entries: parsed } };
 };
 
 export const parseDebugPuzzleResponse = (value: unknown): DebugPuzzleResponse | null => {

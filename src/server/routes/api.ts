@@ -2,17 +2,18 @@ import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
 import type {
   DebugPuzzleResponse,
+  GalleryResponse,
   PuzzleResponse,
   ResultResponse,
   SubmitRejection,
   SubmitResponse,
 } from '../../shared/api';
-import { parseSubmitRequest } from '../../shared/api';
+import { isGallerySort, parseSubmitRequest } from '../../shared/api';
 import { isSolved } from '../../shared/logic';
 import { isDevSubreddit } from '../core/dev';
 import { loadPost, type PostRecord } from '../core/posts';
 import { QUEUE, puzzleByNumber } from '../core/queue';
-import { acceptSubmission, buildResult } from '../core/scores';
+import { acceptSubmission, buildGallery, buildResult } from '../core/scores';
 import { getStored, getSubmission } from '../core/submissions';
 
 // Mounted at /api in index.ts, so every route here starts with /api/.
@@ -84,6 +85,8 @@ api.post('/submit', async (c) => {
   return c.json<SubmitResponse>({ status, submission });
 });
 
+const NOT_SUBMITTED = { status: 'not-submitted', message: 'Submit your solution to see the results.' } as const;
+
 // Results are only for players who have submitted, so nobody can read the
 // leaderboard or the record before solving.
 api.get('/result', async (c) => {
@@ -91,13 +94,21 @@ api.get('/result', async (c) => {
   const current = await currentPost();
   if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
   const stored = userId ? await getStored(current.postId, userId) : null;
-  if (!stored) {
-    return c.json<ResultResponse>(
-      { status: 'not-submitted', message: 'Submit your solution to see the results.' },
-      403
-    );
-  }
+  if (!stored) return c.json<ResultResponse>(NOT_SUBMITTED, 403);
   return c.json<ResultResponse>({ status: 'ok', result: await buildResult(current.post, stored) });
+});
+
+// The gallery holds other players' sculptures, which are answers. Like the
+// result, it is only for a player who has already submitted for this post.
+api.get('/gallery', async (c) => {
+  const { userId } = context;
+  const current = await currentPost();
+  if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  const stored = userId ? await getStored(current.postId, userId) : null;
+  if (!stored) return c.json<GalleryResponse>(NOT_SUBMITTED, 403);
+  const sort = c.req.query('sort');
+  const gallery = await buildGallery(stored, isGallerySort(sort) ? sort : 'rarest', Number(c.req.query('page')));
+  return c.json<GalleryResponse>({ status: 'ok', gallery });
 });
 
 // TEMPORARY: lets the dev subreddit play any puzzle in the queue. Anywhere

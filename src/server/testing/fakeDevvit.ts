@@ -19,6 +19,9 @@ export const createFakeDevvit = () => {
   const sortedSets = new Map<string, Map<string, number>>();
   const posts: FakePost[] = [];
   const moderators = new Set<string>();
+  const userFlairs = new Map<string, string>();
+  let userFlairsEnabled = true;
+  let failFlair = false;
   let failNextPost = false;
 
   const sortedSet = (key: string): Map<string, number> => {
@@ -125,6 +128,14 @@ export const createFakeDevvit = () => {
       return { id: post.id };
     },
     getCurrentUsername: async (): Promise<string | undefined> => context.username,
+    getCurrentSubreddit: async (): Promise<{ name: string; userFlairsEnabled: boolean }> => ({
+      name: context.subredditName,
+      userFlairsEnabled,
+    }),
+    setUserFlair: async (options: { subredditName: string; username: string; text?: string }): Promise<void> => {
+      if (failFlair) throw new Error('Flair is unavailable');
+      userFlairs.set(options.username, options.text ?? '');
+    },
     getModerators: (options: { subredditName: string; username?: string }) => ({
       all: async (): Promise<{ username: string }[]> =>
         [...moderators]
@@ -145,6 +156,16 @@ export const createFakeDevvit = () => {
     /** A sorted set's members, lowest score first. */
     sortedSetMembers: (key: string): string[] =>
       [...sortedSet(key)].sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1)).map(([member]) => member),
+    /** The flair text each username has been given. */
+    userFlairs: (): Record<string, string> => Object.fromEntries(userFlairs),
+    /** Turns user flair in the subreddit on or off. */
+    setUserFlairsEnabled: (enabled: boolean): void => {
+      userFlairsEnabled = enabled;
+    },
+    /** Makes every setUserFlair call throw, or work again. */
+    setFlairFailing: (failing: boolean): void => {
+      failFlair = failing;
+    },
     /** Makes a username a moderator of the subreddit. */
     addModerator: (username: string): void => {
       moderators.add(username);
@@ -169,6 +190,9 @@ export const createFakeDevvit = () => {
       sortedSets.clear();
       posts.length = 0;
       moderators.clear();
+      userFlairs.clear();
+      userFlairsEnabled = true;
+      failFlair = false;
       failNextPost = false;
       context.postId = undefined;
       context.postData = undefined;

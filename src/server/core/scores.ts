@@ -1,10 +1,11 @@
 // Everything derived from accepted submissions: the leaderboard, rarity
-// counts and streaks, and the result a player sees for a post.
+// counts, the gallery and streaks, and what a player sees of them.
 
 import { createHash } from 'node:crypto';
 import { redis } from '@devvit/web/server';
-import type { LeaderboardRow, Result } from '../../shared/api';
+import type { Gallery, GalleryEntry, GallerySort, LeaderboardRow, Result } from '../../shared/api';
 import { starsFor } from '../../shared/score';
+import { flairMilestone, setStreakFlair } from './flair';
 import { KEYS } from './keys';
 import { newestDaily, type PostRecord } from './posts';
 import { parseStored, storeSubmission, type StoreOutcome, type StoredSubmission } from './submissions';
@@ -13,6 +14,8 @@ import { parseStored, storeSubmission, type StoreOutcome, type StoredSubmission 
 export const LEADERBOARD_ROWS = 10;
 /** Below this many solvers, a rarity percentage would mean nothing. */
 export const MIN_RARITY_SAMPLE = 5;
+/** Sculptures on one page of the gallery. */
+export const GALLERY_PAGE_SIZE = 20;
 
 /**
  * Leaderboard score: block count first, submission time as tie-break. One
@@ -23,16 +26,25 @@ const SCORE_STEP = 1e13;
 const scoreFor = (blocks: number, submittedAt: number): number => blocks * SCORE_STEP + submittedAt;
 const blocksFromScore = (score: number): number => Math.floor(score / SCORE_STEP);
 
-/** A short, fixed-length name for a sculpture, used as a hash field. */
+/** A short, fixed-length name for a sculpture, the same for everyone who built it. */
 export const sculptureHash = (canonical: string): string =>
   createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 
+/** Field of the sculpture counts: block count and hash together. */
+const sculptureField = (blocks: number, hash: string): string => `${blocks}:${hash}`;
+
 // --- Streaks -------------------------------------------------------------------
 
-/** `last` is the `daily` value of the last daily post counted, 0 for none. */
-type Streak = { current: number; best: number; last: number };
+type Streak = {
+  current: number;
+  best: number;
+  /** The `daily` value of the last daily post counted, 0 for none. */
+  last: number;
+  /** The streak flair already given, in days, 0 for none. */
+  flair: number;
+};
 
-const NO_STREAK: Streak = { current: 0, best: 0, last: 0 };
+const NO_STREAK: Streak = { current: 0, best: 0, last: 0, flair: 0 };
 
 const readStreak = async (userId: string): Promise<Streak> => {
   const json = await redis.hGet(KEYS.streaks, userId);
@@ -42,21 +54,33 @@ const readStreak = async (userId: string): Promise<Streak> => {
   if (!('current' in value) || !('best' in value) || !('last' in value)) return NO_STREAK;
   const { current, best, last } = value;
   if (typeof current !== 'number' || typeof best !== 'number' || typeof last !== 'number') return NO_STREAK;
-  return { current, best, last };
+  const flair = 'flair' in value && typeof value.flair === 'number' ? value.flair : 0;
+  return { current, best, last, flair };
 };
+
+const writeStreak = (userId: string, streak: Streak): Promise<number> =>
+  redis.hSet(KEYS.streaks, { [userId]: JSON.stringify(streak) });
 
 /**
  * Counts a solve towards the player's streak. Only a daily post counts, and
  * only while it is the newest daily post: an older post, or an extra post made
- * from the menu, changes nothing.
+ * from the menu, changes nothing. A best streak that reaches a flair milestone
+ * earns the flair, once.
  */
-const updateStreak = async (userId: string, daily: number | null): Promise<void> => {
+const updateStreak = async (userId: string, username: string, daily: number | null): Promise<void> => {
   if (daily === null || daily !== (await newestDaily())) return;
   const streak = await readStreak(userId);
   if (streak.last === daily) return;
   const current = streak.last === daily - 1 ? streak.current + 1 : 1;
-  const next: Streak = { current, best: Math.max(streak.best, current), last: daily };
-  await redis.hSet(KEYS.streaks, { [userId]: JSON.stringify(next) });
+  const next: Streak = { ...streak, current, best: Math.max(streak.best, current), last: daily };
+  await writeStreak(userId, next);
+
+  // Flair comes after the streak is safely stored. If setting it fails, the
+  // record still says the old flair, so the next counted solve tries again.
+  const earned = flairMilestone(next.best);
+  if (earned > next.flair && (await setStreakFlair(username, earned))) {
+    await writeStreak(userId, { ...next, flair: earned });
+  }
 };
 
 /**
@@ -69,22 +93,61 @@ const shownStreak = (streak: Streak, newest: number): Result['streak'] => ({
   best: streak.best,
 });
 
-// --- Recording a solve -----------------------------------------------------------
+// --- Counting a solve ------------------------------------------------------------
 
-/** Adds one newly stored submission to the post's leaderboard and counts, and to the player's streak. */
-const recordSolve = async (post: PostRecord, stored: StoredSubmission): Promise<void> => {
-  const { postId, userId, blocks, sculpture, submittedAt } = stored;
-  await redis.zAdd(KEYS.leaderboard(postId), { member: userId, score: scoreFor(blocks, submittedAt) });
-  await redis.hIncrBy(KEYS.blockCounts(postId), String(blocks), 1);
-  await redis.hIncrBy(KEYS.sculptures(postId), sculptureHash(sculpture), 1);
-  await updateStreak(userId, post.daily);
+type CountStep = 'board' | 'tally' | 'sculpture';
+const COUNT_STEPS: readonly CountStep[] = ['board', 'tally', 'sculpture'];
+const stepField = (step: CountStep, userId: string): string => `${step}:${userId}`;
+
+/** What the gallery keeps for each distinct sculpture. */
+type SavedSculpture = { sculpture: string; first: string };
+
+/**
+ * Adds a stored submission to the post's leaderboard, block-count tally and
+ * sculpture counts. Each of the three is claimed first with hSetNX, which
+ * writes only when the field is new, so however many requests call this for
+ * the same player, each step runs once. Calling it again for a submission
+ * that was only partly counted finishes the job.
+ */
+const countSolve = async (stored: StoredSubmission): Promise<void> => {
+  const { postId, userId, username, blocks, sculpture, submittedAt } = stored;
+  const claim = async (step: CountStep): Promise<boolean> =>
+    (await redis.hSetNX(KEYS.counted(postId), stepField(step, userId), '1')) === 1;
+
+  if (await claim('board')) {
+    await redis.zAdd(KEYS.leaderboard(postId), { member: userId, score: scoreFor(blocks, submittedAt) });
+  }
+  if (await claim('tally')) {
+    await redis.hIncrBy(KEYS.blockCounts(postId), String(blocks), 1);
+  }
+  if (await claim('sculpture')) {
+    const hash = sculptureHash(sculpture);
+    // Kept from the first player to build it; later builders only add to the count.
+    const saved: SavedSculpture = { sculpture, first: username };
+    await redis.hSetNX(KEYS.gallery(postId), hash, JSON.stringify(saved));
+    await redis.hIncrBy(KEYS.sculptures(postId), sculptureField(blocks, hash), 1);
+  }
+};
+
+/**
+ * Makes sure a stored submission has been counted. Normally it has; this
+ * repairs the rare case where the server stopped between storing a submission
+ * and counting it.
+ */
+const ensureCounted = async (stored: StoredSubmission): Promise<void> => {
+  const marks = await redis.hMGet(
+    KEYS.counted(stored.postId),
+    COUNT_STEPS.map((step) => stepField(step, stored.userId))
+  );
+  if (marks.some((mark) => mark === null || mark === undefined)) await countSolve(stored);
 };
 
 /**
  * Stores a solved sculpture and, the first time only, counts it. Of any
  * number of requests from one player for one post, exactly one is 'accepted'
- * by storeSubmission, and only that one reaches recordSolve: the leaderboard,
- * rarity counts and streak each change once per player per post.
+ * by storeSubmission. Only that one touches the streak, and countSolve claims
+ * each of its steps, so the leaderboard, the counts and the streak each
+ * change once per player per post.
  */
 export const acceptSubmission = async (
   postId: string,
@@ -94,7 +157,10 @@ export const acceptSubmission = async (
   now: number
 ): Promise<StoreOutcome> => {
   const outcome = await storeSubmission(postId, post, player, blocks, now);
-  if (outcome.status === 'accepted') await recordSolve(post, outcome.stored);
+  if (outcome.status === 'accepted') {
+    await countSolve(outcome.stored);
+    await updateStreak(player.userId, player.username, post.daily);
+  }
   return outcome;
 };
 
@@ -102,6 +168,7 @@ export const acceptSubmission = async (
 
 /** The result for a player who has submitted. `stored` must be the caller's own record. */
 export const buildResult = async (post: PostRecord, stored: StoredSubmission): Promise<Result> => {
+  await ensureCounted(stored);
   const { postId, userId, blocks } = stored;
   const { par } = post.puzzle;
 
@@ -135,7 +202,8 @@ export const buildResult = async (post: PostRecord, stored: StoredSubmission): P
     ? null
     : { rank: rankOf(blocks), username: stored.username, blocks, you: true };
 
-  const same = Math.max(Number(await redis.hGet(KEYS.sculptures(postId), sculptureHash(stored.sculpture))) || 0, 1);
+  const field = sculptureField(blocks, sculptureHash(stored.sculpture));
+  const same = Math.max(Number(await redis.hGet(KEYS.sculptures(postId), field)) || 0, 1);
 
   return {
     blocks,
@@ -150,4 +218,71 @@ export const buildResult = async (post: PostRecord, stored: StoredSubmission): P
     rarity: { same, share: Math.min(same / solvers, 1), smallSample: solvers < MIN_RARITY_SAMPLE },
     streak: shownStreak(await readStreak(userId), await newestDaily()),
   };
+};
+
+// --- Reading the gallery ---------------------------------------------------------
+
+const parseSaved = (json: string | null | undefined): SavedSculpture | null => {
+  if (json === undefined || json === null) return null;
+  const value: unknown = JSON.parse(json);
+  if (typeof value !== 'object' || value === null || !('sculpture' in value) || !('first' in value)) return null;
+  const { sculpture, first } = value;
+  return typeof sculpture === 'string' && typeof first === 'string' ? { sculpture, first } : null;
+};
+
+/**
+ * One page of the distinct sculptures submitted for a post. Only call this
+ * for a player who has submitted; `stored` must be the caller's own record.
+ */
+export const buildGallery = async (
+  stored: StoredSubmission,
+  sort: GallerySort,
+  requestedPage: number
+): Promise<Gallery> => {
+  await ensureCounted(stored);
+  const { postId } = stored;
+  const ownHash = sculptureHash(stored.sculpture);
+
+  // Block count, hash and builders for every distinct sculpture, in one read.
+  const all = Object.entries(await redis.hGetAll(KEYS.sculptures(postId)))
+    .map(([field, builders]) => {
+      const [blocks = '', hash = ''] = field.split(':');
+      return { hash, blocks: Number(blocks), builders: Number(builders) };
+    })
+    .filter((entry) => entry.hash !== '' && Number.isInteger(entry.blocks) && entry.builders > 0);
+
+  // The hash is the last tie-break, so pages never shuffle between requests.
+  const byName = (a: { hash: string }, b: { hash: string }): number => (a.hash < b.hash ? -1 : 1);
+  all.sort(
+    sort === 'rarest'
+      ? (a, b) => a.builders - b.builders || a.blocks - b.blocks || byName(a, b)
+      : (a, b) => a.blocks - b.blocks || a.builders - b.builders || byName(a, b)
+  );
+
+  const pages = Math.max(1, Math.ceil(all.length / GALLERY_PAGE_SIZE));
+  const page = Math.min(Math.max(Math.trunc(requestedPage) || 1, 1), pages);
+  const shown = all.slice((page - 1) * GALLERY_PAGE_SIZE, page * GALLERY_PAGE_SIZE);
+  const saved =
+    shown.length > 0
+      ? await redis.hMGet(
+          KEYS.gallery(postId),
+          shown.map((entry) => entry.hash)
+        )
+      : [];
+
+  const entries: GalleryEntry[] = shown.flatMap((entry, index) => {
+    const details = parseSaved(saved[index]);
+    if (!details) return [];
+    return [
+      {
+        id: entry.hash,
+        blocks: entry.blocks,
+        builders: entry.builders,
+        first: details.first,
+        sculpture: details.sculpture === '' ? [] : details.sculpture.split(';'),
+        yours: entry.hash === ownHash,
+      },
+    ];
+  });
+  return { sort, page, pages, total: all.length, entries };
 };

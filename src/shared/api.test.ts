@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_BOARD_EDGE,
+  isGallerySort,
+  parseGalleryResponse,
   parsePuzzle,
   parsePuzzleResponse,
   parseResultResponse,
@@ -253,5 +255,59 @@ describe('parseResultResponse', () => {
     expect(parseResultResponse({ status: 'not-submitted' })).toBeNull();
     expect(parseResultResponse({ status: 'error', message: 'This post has no puzzle.' })).toBeNull();
     expect(parseResultResponse(null)).toBeNull();
+  });
+});
+
+describe('parseGalleryResponse', () => {
+  const entry = { id: 'ab12', blocks: 9, builders: 3, first: 'ann', sculpture: ['0,0,0', '0,1,0'], yours: false };
+  const gallery = { sort: 'rarest', page: 1, pages: 3, total: 45, entries: [entry, { ...entry, id: 'cd34', yours: true }] };
+  const ok = (changes: Record<string, unknown>): unknown => ({ status: 'ok', gallery: { ...gallery, ...changes } });
+
+  it('accepts a page of sculptures, and an empty one', () => {
+    expect(parseGalleryResponse(ok({}))).toEqual({ status: 'ok', gallery });
+    expect(parseGalleryResponse(ok({ sort: 'leanest', entries: [] }))).toEqual({
+      status: 'ok',
+      gallery: { ...gallery, sort: 'leanest', entries: [] },
+    });
+  });
+
+  it('accepts the not-yet-submitted answer', () => {
+    const refusal = { status: 'not-submitted', message: 'Submit your solution to see the results.' };
+    expect(parseGalleryResponse(refusal)).toEqual(refusal);
+  });
+
+  it('keeps only the fields it knows', () => {
+    const parsed = parseGalleryResponse(ok({ entries: [{ ...entry, userId: 't2_ann', submittedAt: 5 }] }));
+    expect(parsed).toEqual({ status: 'ok', gallery: { ...gallery, entries: [entry] } });
+  });
+
+  it('rejects a gallery with a bad or missing part', () => {
+    const bad: Record<string, unknown>[] = [
+      { sort: 'prettiest' },
+      { page: 0 },
+      { pages: 0 },
+      { total: -1 },
+      { entries: 'none' },
+      { entries: [{ ...entry, id: '' }] },
+      { entries: [{ ...entry, builders: 0 }] },
+      { entries: [{ ...entry, first: 7 }] },
+      { entries: [{ ...entry, yours: 'no' }] },
+      { entries: [{ ...entry, sculpture: ['0,0'] }] },
+      { entries: [{ ...entry, sculpture: '0,0,0' }] },
+    ];
+    for (const changes of bad) expect(parseGalleryResponse(ok(changes)), JSON.stringify(changes)).toBeNull();
+  });
+
+  it('rejects other bodies', () => {
+    expect(parseGalleryResponse({ status: 'ok' })).toBeNull();
+    expect(parseGalleryResponse({ status: 'error', message: 'This post has no puzzle.' })).toBeNull();
+    expect(parseGalleryResponse(null)).toBeNull();
+  });
+
+  it('knows the two sort orders', () => {
+    expect(isGallerySort('rarest')).toBe(true);
+    expect(isGallerySort('leanest')).toBe(true);
+    expect(isGallerySort('newest')).toBe(false);
+    expect(isGallerySort(undefined)).toBe(false);
   });
 });

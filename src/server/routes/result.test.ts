@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseResultResponse, parseSubmitResponse, type Result } from '../../shared/api';
+import {
+  parseGalleryResponse,
+  parseResultResponse,
+  parseSubmitResponse,
+  type Gallery,
+  type Result,
+} from '../../shared/api';
 import { TEST_PUZZLE, TEST_SOLUTION, type Puzzle } from '../../shared/puzzle';
 import { canonicalSculpture } from '../../shared/score';
 import { KEYS } from '../core/keys';
+import { sculptureHash } from '../core/scores';
 import type { FakePost } from '../testing/fakeDevvit';
 import { parSolution, solutionWith } from '../testing/solutions';
 
@@ -75,6 +82,43 @@ const resultFor = async (target: Opened, name: string): Promise<Result> => {
   if (parsed?.status !== 'ok') throw new Error(`No result for ${name}: ${JSON.stringify(body)}`);
   return parsed.result;
 };
+
+const fetchGallery = async ({ post }: Opened, name: string | undefined, query = '') => {
+  devvit.enterPost(post, name === undefined ? undefined : `t2_${name}`);
+  const response = await api.request(`/gallery${query}`);
+  const body: unknown = await response.json();
+  return { status: response.status, body, parsed: parseGalleryResponse(body) };
+};
+
+const galleryFor = async (target: Opened, name: string, query = ''): Promise<Gallery> => {
+  const { parsed, body } = await fetchGallery(target, name, query);
+  if (parsed?.status !== 'ok') throw new Error(`No gallery for ${name}: ${JSON.stringify(body)}`);
+  return parsed.gallery;
+};
+
+/**
+ * Stores a submission the way the server would, then stops before counting
+ * it: what is left behind if the server dies between the two.
+ */
+const storeUncounted = async ({ post, puzzle }: Opened, name: string, blocks: readonly string[]) => {
+  clock += 1000;
+  const record = {
+    userId: `t2_${name}`,
+    username: name,
+    postId: post.id,
+    puzzleId: puzzle.id,
+    blocks: blocks.length,
+    sculpture: canonicalSculpture(blocks),
+    submittedAt: clock,
+  };
+  await devvit.redis.hSetNX(KEYS.submissions(post.id), record.userId, JSON.stringify(record));
+};
+
+const countsOf = (postId: string) => ({
+  leaderboard: devvit.sortedSetMembers(KEYS.leaderboard(postId)),
+  tally: devvit.hashContents(KEYS.blockCounts(postId)),
+  sculptures: Object.values(devvit.hashContents(KEYS.sculptures(postId))).map(Number).sort(),
+});
 
 beforeEach(() => {
   devvit.reset();
@@ -341,7 +385,12 @@ describe('two simultaneous submissions from one player', () => {
     expect(devvit.sortedSetMembers(KEYS.leaderboard(postId))).toEqual(['t2_ann']);
     expect(devvit.hashContents(KEYS.blockCounts(postId))).toEqual({ [String(blocks.length)]: '1' });
     expect(Object.values(devvit.hashContents(KEYS.sculptures(postId)))).toEqual(['1']);
-    expect(JSON.parse(devvit.hashContents(KEYS.streaks).t2_ann ?? '{}')).toEqual({ current: 1, best: 1, last: 1 });
+    expect(JSON.parse(devvit.hashContents(KEYS.streaks).t2_ann ?? '{}')).toEqual({
+      current: 1,
+      best: 1,
+      last: 1,
+      flair: 0,
+    });
     expect(await resultFor(day1, 'ann')).toMatchObject({
       rank: 1,
       tied: 1,
@@ -349,5 +398,296 @@ describe('two simultaneous submissions from one player', () => {
       rarity: { same: 1 },
       streak: { current: 1, best: 1 },
     });
+  });
+});
+
+describe('a submission that was stored but never counted', () => {
+  it('is added once when its result is fetched, and not again', async () => {
+    const target = await manualPost();
+    const { puzzle, post } = target;
+    await solveAs(target, 'ann');
+    await storeUncounted(target, 'bea', solutionWith(puzzle, puzzle.par + 1));
+    expect(countsOf(post.id).leaderboard).toEqual(['t2_ann']);
+
+    const healed = await resultFor(target, 'bea');
+    expect(healed).toMatchObject({ rank: 2, tied: 1, solvers: 2, rarity: { same: 1 } });
+    expect(healed.leaderboard.map((row) => row.username)).toEqual(['ann', 'bea']);
+
+    const after = countsOf(post.id);
+    expect(after).toEqual({
+      leaderboard: ['t2_ann', 't2_bea'],
+      tally: { [String(puzzle.par)]: '1', [String(puzzle.par + 1)]: '1' },
+      sculptures: [1, 1],
+    });
+    await resultFor(target, 'bea');
+    await resultFor(target, 'bea');
+    expect(countsOf(post.id)).toEqual(after);
+    // The player who was counted normally is untouched throughout.
+    expect(await resultFor(target, 'ann')).toMatchObject({ rank: 1, tied: 1, solvers: 2 });
+    expect(countsOf(post.id)).toEqual(after);
+  });
+
+  it('is added once when several requests find it at the same moment', async () => {
+    const target = await manualPost();
+    await storeUncounted(target, 'ann', parSolution(target.puzzle.number));
+    devvit.enterPost(target.post, 't2_ann');
+    const responses = await Promise.all([api.request('/result'), api.request('/result'), api.request('/gallery')]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200]);
+    expect(countsOf(target.post.id)).toEqual({
+      leaderboard: ['t2_ann'],
+      tally: { [String(target.puzzle.par)]: '1' },
+      sculptures: [1],
+    });
+  });
+
+  it('is finished when only some of it was counted', async () => {
+    const target = await manualPost();
+    const { post, puzzle } = target;
+    const blocks = parSolution(puzzle.number);
+    await storeUncounted(target, 'ann', blocks);
+    // The leaderboard step had already happened when the server stopped.
+    await devvit.redis.hSetNX(KEYS.counted(post.id), 'board:t2_ann', '1');
+    await devvit.redis.zAdd(KEYS.leaderboard(post.id), { member: 't2_ann', score: blocks.length * 1e13 + clock });
+
+    expect(await resultFor(target, 'ann')).toMatchObject({ rank: 1, tied: 1, solvers: 1, rarity: { same: 1 } });
+    expect(countsOf(post.id)).toEqual({
+      leaderboard: ['t2_ann'],
+      tally: { [String(puzzle.par)]: '1' },
+      sculptures: [1],
+    });
+  });
+
+  it('is also repaired when the gallery is opened first', async () => {
+    const target = await manualPost();
+    await storeUncounted(target, 'ann', parSolution(target.puzzle.number));
+    const gallery = await galleryFor(target, 'ann');
+    expect(gallery.entries).toHaveLength(1);
+    expect(gallery.entries[0]).toMatchObject({ builders: 1, first: 'ann', yours: true });
+  });
+});
+
+describe('GET /api/gallery', () => {
+  it('refuses a player who has not submitted, with nothing to peek at', async () => {
+    const target = await manualPost();
+    await solveAs(target, 'ann');
+    for (const visitor of ['bob', undefined]) {
+      const { status, body, parsed } = await fetchGallery(target, visitor);
+      expect(status).toBe(403);
+      expect(parsed?.status).toBe('not-submitted');
+      expect(Object.keys(Object(body)).sort()).toEqual(['message', 'status']);
+      expect(JSON.stringify(body)).not.toContain('sculpture');
+    }
+  });
+
+  it('answers 404 outside a post that has a puzzle', async () => {
+    devvit.context.postId = 't3_stranger';
+    devvit.context.userId = 't2_ann';
+    expect((await api.request('/gallery')).status).toBe(404);
+  });
+
+  it('saves each distinct sculpture once, counts its builders and keeps the first builder', async () => {
+    const target = await manualPost();
+    const { puzzle, post } = target;
+    const common = parSolution(puzzle.number);
+    const rare = solutionWith(puzzle, puzzle.par + 1);
+    await submitAs(target, 'ann', common);
+    await submitAs(target, 'bea', rare);
+    // The same sculpture as ann's, sent in another order.
+    await submitAs(target, 'cat', [...common].reverse());
+    await submitAs(target, 'dee', common);
+
+    const gallery = await galleryFor(target, 'bea');
+    expect(gallery).toMatchObject({ sort: 'rarest', page: 1, pages: 1, total: 2 });
+    expect(gallery.entries).toEqual([
+      {
+        id: sculptureHash(canonicalSculpture(rare)),
+        blocks: puzzle.par + 1,
+        builders: 1,
+        first: 'bea',
+        sculpture: canonicalSculpture(rare).split(';'),
+        yours: true,
+      },
+      {
+        id: sculptureHash(canonicalSculpture(common)),
+        blocks: puzzle.par,
+        builders: 3,
+        first: 'ann',
+        sculpture: canonicalSculpture(common).split(';'),
+        yours: false,
+      },
+    ]);
+    // Two sculptures saved, however many players built them.
+    expect(Object.keys(devvit.hashContents(KEYS.gallery(post.id)))).toHaveLength(2);
+
+    // The mark follows the caller.
+    expect((await galleryFor(target, 'dee')).entries.map((entry) => entry.yours)).toEqual([false, true]);
+  });
+
+  it('sorts rarest first or leanest first', async () => {
+    const target = await manualPost();
+    const { puzzle } = target;
+    const { par } = puzzle;
+    // par: 3 builders. par + 1: 1 builder. par + 2: 2 builders. par + 3: 1 builder.
+    for (const name of ['a1', 'a2', 'a3']) await submitAs(target, name, solutionWith(puzzle, par));
+    await submitAs(target, 'b1', solutionWith(puzzle, par + 1));
+    for (const name of ['c1', 'c2']) await submitAs(target, name, solutionWith(puzzle, par + 2));
+    await submitAs(target, 'd1', solutionWith(puzzle, par + 3));
+
+    const shape = (gallery: Gallery) => gallery.entries.map((entry) => [entry.builders, entry.blocks]);
+    // Fewest builders, then fewest blocks.
+    expect(shape(await galleryFor(target, 'a1', '?sort=rarest'))).toEqual([
+      [1, par + 1],
+      [1, par + 3],
+      [2, par + 2],
+      [3, par],
+    ]);
+    // Fewest blocks, then fewest builders.
+    expect(shape(await galleryFor(target, 'a1', '?sort=leanest'))).toEqual([
+      [3, par],
+      [1, par + 1],
+      [2, par + 2],
+      [1, par + 3],
+    ]);
+    // Rarest is the default, and an unknown order falls back to it.
+    expect((await galleryFor(target, 'a1')).sort).toBe('rarest');
+    expect((await galleryFor(target, 'a1', '?sort=prettiest')).sort).toBe('rarest');
+  });
+
+  it('among sculptures with the same block count, puts fewer builders first when sorting leanest', async () => {
+    const target = await manualPost();
+    const { post, puzzle } = target;
+    const { par } = puzzle;
+    await solveAs(target, 'ann'); // par blocks, 1 builder
+    // Three more sculptures of par + 1 blocks, written straight into the
+    // counts, built by 4, 1 and 2 players.
+    const fakes: [string, number][] = [
+      ['fakeaaaaaaaaaaaa', 4],
+      ['fakebbbbbbbbbbbb', 1],
+      ['fakecccccccccccc', 2],
+    ];
+    for (const [hash, builders] of fakes) {
+      await devvit.redis.hSet(KEYS.sculptures(post.id), { [`${par + 1}:${hash}`]: String(builders) });
+      await devvit.redis.hSet(KEYS.gallery(post.id), { [hash]: JSON.stringify({ sculpture: '0,0,0', first: hash }) });
+    }
+    const leanest = await galleryFor(target, 'ann', '?sort=leanest');
+    expect(leanest.entries.map((entry) => [entry.blocks, entry.builders])).toEqual([
+      [par, 1],
+      [par + 1, 1],
+      [par + 1, 2],
+      [par + 1, 4],
+    ]);
+    const rarest = await galleryFor(target, 'ann', '?sort=rarest');
+    expect(rarest.entries.map((entry) => [entry.builders, entry.blocks])).toEqual([
+      [1, par],
+      [1, par + 1],
+      [2, par + 1],
+      [4, par + 1],
+    ]);
+  });
+
+  it('pages twenty at a time', async () => {
+    const target = await manualPost();
+    const { post, puzzle } = target;
+    await solveAs(target, 'ann');
+    // 44 more distinct sculptures, written straight into the counts: real
+    // puzzles do not have that many different solutions to hand.
+    const ownHash = sculptureHash(canonicalSculpture(parSolution(puzzle.number)));
+    for (let index = 0; index < 44; index++) {
+      const hash = `fake${String(index).padStart(12, '0')}`;
+      const blocks = puzzle.par + 1 + (index % 5);
+      await devvit.redis.hSet(KEYS.sculptures(post.id), { [`${blocks}:${hash}`]: String(1 + (index % 3)) });
+      await devvit.redis.hSet(KEYS.gallery(post.id), {
+        [hash]: JSON.stringify({ sculpture: '0,0,0', first: `player${index}` }),
+      });
+    }
+
+    const one = await galleryFor(target, 'ann', '?sort=leanest&page=1');
+    const two = await galleryFor(target, 'ann', '?sort=leanest&page=2');
+    const three = await galleryFor(target, 'ann', '?sort=leanest&page=3');
+    expect([one, two, three].map((page) => [page.page, page.pages, page.total, page.entries.length])).toEqual([
+      [1, 3, 45, 20],
+      [2, 3, 45, 20],
+      [3, 3, 45, 5],
+    ]);
+    // Every sculpture appears exactly once across the pages, in order.
+    const ids = [one, two, three].flatMap((page) => page.entries.map((entry) => entry.id));
+    expect(new Set(ids).size).toBe(45);
+    const blocks = [one, two, three].flatMap((page) => page.entries.map((entry) => entry.blocks));
+    expect(blocks).toEqual([...blocks].sort((a, b) => a - b));
+    // The caller's own sculpture is marked wherever it lands: leanest, so first.
+    expect(one.entries[0]).toMatchObject({ id: ownHash, yours: true });
+    expect(ids.filter((id) => id !== ownHash)).toHaveLength(44);
+
+    // A page outside the range is brought back inside it.
+    expect((await galleryFor(target, 'ann', '?page=99')).page).toBe(3);
+    expect((await galleryFor(target, 'ann', '?page=0')).page).toBe(1);
+    expect((await galleryFor(target, 'ann', '?page=abc')).page).toBe(1);
+  });
+});
+
+describe('streak flair', () => {
+  /** Solves `days` daily posts in a row as one player, and returns the last. */
+  const streakOf = async (name: string, days: number): Promise<Opened> => {
+    let last: Opened | undefined;
+    for (let day = 0; day < days; day++) {
+      last = await dailyPost(day);
+      await solveAs(last, name);
+    }
+    if (!last) throw new Error('No days');
+    return last;
+  };
+
+  it('is given when the best streak first reaches three days, and not before', async () => {
+    const day1 = await dailyPost(0);
+    await solveAs(day1, 'ann');
+    const day2 = await dailyPost(1);
+    await solveAs(day2, 'ann');
+    expect(devvit.userFlairs()).toEqual({});
+    const day3 = await dailyPost(2);
+    await solveAs(day3, 'ann');
+    expect(devvit.userFlairs()).toEqual({ ann: '3-day streak' });
+    expect((await resultFor(day3, 'ann')).streak).toEqual({ current: 3, best: 3 });
+  });
+
+  it('is kept when the streak is later broken', async () => {
+    await streakOf('ann', 3);
+    await dailyPost(3); // missed
+    const day5 = await dailyPost(4);
+    await solveAs(day5, 'ann');
+    expect((await resultFor(day5, 'ann')).streak).toEqual({ current: 1, best: 3 });
+    expect(devvit.userFlairs()).toEqual({ ann: '3-day streak' });
+  });
+
+  it('is not set when the subreddit has user flair turned off, and is set later once it is on', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      devvit.setUserFlairsEnabled(false);
+      await streakOf('ann', 3);
+      expect(devvit.userFlairs()).toEqual({});
+      expect(warn).toHaveBeenCalled();
+      // The submission itself was fine.
+      expect(JSON.parse(devvit.hashContents(KEYS.streaks).t2_ann ?? '{}')).toMatchObject({ best: 3, flair: 0 });
+
+      devvit.setUserFlairsEnabled(true);
+      const day4 = await dailyPost(3);
+      expect(await solveAs(day4, 'ann')).toBe('accepted');
+      expect(devvit.userFlairs()).toEqual({ ann: '3-day streak' });
+      expect(JSON.parse(devvit.hashContents(KEYS.streaks).t2_ann ?? '{}')).toMatchObject({ best: 4, flair: 3 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('never fails a submission when setting flair goes wrong', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      devvit.setFlairFailing(true);
+      const day3 = await streakOf('ann', 3);
+      expect(error).toHaveBeenCalled();
+      expect(devvit.userFlairs()).toEqual({});
+      expect(await resultFor(day3, 'ann')).toMatchObject({ rank: 1, streak: { current: 3, best: 3 } });
+    } finally {
+      error.mockRestore();
+    }
   });
 });
