@@ -9,10 +9,39 @@
     />
     <title>Twin Shadows</title>
   </head>
-  <body class="app">
-    <h1 class="title">Twin Shadows</h1>
-    <p class="description">Build one sculpture that casts both shadows.</p>
-    <button class="play-button" id="play-button" type="button">Play</button>
+  <body>
+    <main class="splash" id="splash">
+      <header class="splash-head">
+        <h1 class="splash-title">Twin Shadows</h1>
+        <p class="splash-heading" id="splash-heading"></p>
+        <p class="splash-description" id="splash-description"></p>
+      </header>
+
+      <!-- The puzzle itself: the two shadows wanted, on the same paper as in the game. -->
+      <div class="splash-panels" id="splash-panels" hidden>
+        <figure class="splash-panel front">
+          <figcaption>Front</figcaption>
+          <canvas id="splash-front" aria-hidden="true"></canvas>
+        </figure>
+        <figure class="splash-panel side">
+          <figcaption>Side</figcaption>
+          <canvas id="splash-side" aria-hidden="true"></canvas>
+        </figure>
+      </div>
+
+      <p class="splash-notice" id="splash-notice" role="status" hidden></p>
+
+      <div class="splash-state" id="splash-state" hidden>
+        <p class="splash-played" id="splash-played" hidden>
+          <span class="splash-stars" id="splash-stars"></span>
+          <span id="splash-result"></span>
+        </p>
+        <p class="splash-stats" id="splash-stats"></p>
+      </div>
+
+      <button class="splash-button" id="play-button" type="button">Play</button>
+      <p class="splash-credit" id="splash-credit"></p>
+    </main>
     <script type="module" src="splash.ts" defer></script>
   </body>
 </html>

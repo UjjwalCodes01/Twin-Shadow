@@ -131,6 +131,12 @@ const PAINT = {
     specks: { perCell: 26, dark: PENCIL, darkAlpha: 0.05, lightAlpha: 0.35 },
     /** The ruling over the whole sheet, and the slightly firmer one inside the target shape. */
     grid: { color: PENCIL, alpha: 0.07, insideAlpha: 0.22, weight: 0.012, minPx: 0.5 },
+    /**
+     * The inside of the target shape, washed faintly in its lamp's colour so
+     * the regions that want shadow can be told from bare paper before any
+     * block is placed. Far lighter than the shadow itself.
+     */
+    wash: { front: 0xb86a3a, side: 0x4a6fae, alpha: 0.17 },
     /** The cast shadow: one shape for all the cells that are lit, see-through, soft at the edge. */
     shadow: { front: WARM_SHADOW, side: COOL_SHADOW, alpha: 0.74, blur: 0.085 },
     /** The one dashed pencil line round the whole target shape. */
@@ -238,7 +244,30 @@ const SCENE = {
   },
 } as const;
 
-export const THEME = { fonts: FONTS, hud: HUD, paint: PAINT, scene: SCENE } as const;
+// --- Motion ----------------------------------------------------------------------
+// Quick and physical, like wooden blocks on a table. Times are milliseconds;
+// distances are shares of one cell. A device that asks for reduced motion
+// gets `reduced` instead: nothing travels, and what fades fades briefly.
+
+const MOTION = {
+  /** A block put down: it falls this far in `fallMs`, then settles with one small rebound. */
+  drop: { height: 0.42, fallMs: 85, settleMs: 40, rebound: 0.035 },
+  /** A block taken away: it rises this far while it fades out. */
+  lift: { height: 0.3, ms: 100 },
+  /** A sculpture swapped for another while viewing: blocks fade rather than fall. */
+  swapMs: 160,
+  /** Shadow arriving on or leaving a wall or panel. */
+  shadowMs: 150,
+  /** A block with nothing under it rides up and down very slightly. */
+  bob: { height: 0.028, periodMs: 1700 },
+  /** The moment a sculpture first becomes a valid solve: both shadows deepen, then ease back. */
+  solve: { deepen: 1.24, holdMs: 260 },
+  /** The floor tile a first-time player is pointed at. */
+  pulse: { color: 0xfff1cf, low: 0.25, high: 0.8, periodMs: 1100 },
+  reduced: { shadowMs: 90, swapMs: 90 },
+} as const;
+
+export const THEME = { fonts: FONTS, hud: HUD, paint: PAINT, scene: SCENE, motion: MOTION } as const;
 export type Theme = typeof THEME;
 
 /** Which of `count` choices a cell takes: the same every time, with no pattern across the board. */

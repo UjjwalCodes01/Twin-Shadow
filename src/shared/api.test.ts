@@ -5,10 +5,13 @@ import {
   parseGalleryResponse,
   parseJoinRequest,
   parseJoinResponse,
+  parseOnboardingRequest,
+  parseOnboardingResponse,
   parsePuzzle,
   parsePuzzleResponse,
   parseResultResponse,
   parseShareResponse,
+  parseSplashResponse,
   parseSubmitRequest,
   parseSubmitResponse,
 } from './api';
@@ -104,6 +107,7 @@ describe('parsePuzzleResponse', () => {
     canSubmit: true,
     submission: null,
     debug: false,
+    onboarding: { warmup: true, solveHint: false },
     ...changes,
   });
 
@@ -113,7 +117,14 @@ describe('parsePuzzleResponse', () => {
       canSubmit: true,
       submission: null,
       debug: false,
+      onboarding: { warmup: true, solveHint: false },
     });
+  });
+
+  it('rejects a missing or half-given onboarding state', () => {
+    expect(parsePuzzleResponse(response({ onboarding: undefined }))).toBeNull();
+    expect(parsePuzzleResponse(response({ onboarding: { warmup: true } }))).toBeNull();
+    expect(parsePuzzleResponse(response({ onboarding: { warmup: 'yes', solveHint: false } }))).toBeNull();
   });
 
   it('accepts a stored submission, keeping only the fields it knows', () => {
@@ -355,5 +366,68 @@ describe('parseJoinRequest and parseJoinResponse', () => {
     expect(parseJoinResponse({ status: 'failed', message: 'x' })).toEqual({ status: 'failed', message: 'x' });
     expect(parseJoinResponse({ status: 'failed' })).toBeNull();
     expect(parseJoinResponse(undefined)).toBeNull();
+  });
+});
+
+describe('parseOnboardingRequest and parseOnboardingResponse', () => {
+  it('accepts the three things a first-time player can have done', () => {
+    for (const event of ['warmup-finished', 'warmup-skipped', 'solve-hint-seen']) {
+      expect(parseOnboardingRequest({ event, extra: 1 })).toEqual({ event });
+    }
+  });
+
+  it('rejects anything else', () => {
+    for (const body of [{ event: 'warmup' }, { event: 1 }, {}, null, 'warmup-finished']) {
+      expect(parseOnboardingRequest(body), JSON.stringify(body)).toBeNull();
+    }
+  });
+
+  it('reads the server`s reply', () => {
+    expect(parseOnboardingResponse({ status: 'ok' })).toEqual({ status: 'ok' });
+    expect(parseOnboardingResponse({ status: 'failed', message: 'x' })).toEqual({ status: 'failed', message: 'x' });
+    expect(parseOnboardingResponse({ status: 'failed' })).toBeNull();
+  });
+});
+
+describe('parseSplashResponse', () => {
+  const splash = {
+    number: 12,
+    date: '2026-11-30',
+    size: { w: 3, d: 3, h: 3 },
+    front: ['...', '###', '#.#'],
+    side: ['...', '#..', '###'],
+    played: null,
+    streak: 2,
+    solvers: 40,
+  };
+
+  it('accepts a post not yet played, solved, and seen logged out', () => {
+    expect(parseSplashResponse(splash)).toEqual(splash);
+    const played = { blocks: 7, par: 6, stars: 2 };
+    expect(parseSplashResponse({ ...splash, played })).toEqual({ ...splash, played });
+    expect(parseSplashResponse({ ...splash, streak: null })).toEqual({ ...splash, streak: null });
+  });
+
+  it('keeps only the fields it knows', () => {
+    const extra = { ...splash, par: 6, played: { blocks: 7, par: 6, stars: 2, sculpture: ['0,0,0'] } };
+    expect(parseSplashResponse(extra)).toEqual({ ...splash, played: { blocks: 7, par: 6, stars: 2 } });
+  });
+
+  it('rejects a bad or missing part', () => {
+    const bad: Record<string, unknown>[] = [
+      { number: -1 },
+      { date: 'today' },
+      { size: { w: 3, d: 3 } },
+      { front: ['..', '##'] },
+      { side: 'none' },
+      { played: { blocks: 7, par: 6, stars: 5 } },
+      { played: undefined },
+      { streak: -1 },
+      { streak: undefined },
+      { solvers: 'many' },
+    ];
+    for (const changes of bad) expect(parseSplashResponse({ ...splash, ...changes }), JSON.stringify(changes)).toBeNull();
+    expect(parseSplashResponse({ status: 'error', message: 'This post has no puzzle.' })).toBeNull();
+    expect(parseSplashResponse(null)).toBeNull();
   });
 });

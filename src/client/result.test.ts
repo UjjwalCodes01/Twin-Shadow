@@ -7,6 +7,7 @@ import {
   rarityText,
   recordText,
   shareButtonText,
+  wholeRowsEnding,
   streakText,
 } from './result';
 
@@ -81,7 +82,7 @@ describe('the Share button', () => {
   it('reads differently in each state', () => {
     expect(shareButtonText('ready')).toBe('Share result');
     expect(shareButtonText('sharing')).toBe('Sharing\u2026');
-    expect(shareButtonText('shared')).toBe('Shared \u2713');
+    expect(shareButtonText('shared')).toBe('Shared');
     expect(shareButtonText('failed')).toBe('Retry share');
   });
 
@@ -90,5 +91,32 @@ describe('the Share button', () => {
     expect(canShare('failed')).toBe(true);
     expect(canShare('sharing')).toBe(false);
     expect(canShare('shared')).toBe(false);
+  });
+});
+
+describe('wholeRowsEnding', () => {
+  const rows = [30, 31, 31, 31, 14, 31];
+
+  it('shows every row when there is room for them all', () => {
+    expect(wholeRowsEnding(rows, 5, 400)).toEqual({ first: 0, height: 168 });
+  });
+
+  it('cuts to whole rows, counted back from the row that must show last', () => {
+    // Room for the last row, the gap above it and one more, but not two.
+    expect(wholeRowsEnding(rows, 5, 80)).toEqual({ first: 3, height: 76 });
+    expect(wholeRowsEnding(rows, 5, 76)).toEqual({ first: 3, height: 76 });
+    expect(wholeRowsEnding(rows, 5, 75)).toEqual({ first: 4, height: 45 });
+  });
+
+  it('always shows the last row, even with no room to speak of', () => {
+    expect(wholeRowsEnding(rows, 5, 10)).toEqual({ first: 5, height: 31 });
+  });
+
+  it('can end on a row in the middle of the list', () => {
+    expect(wholeRowsEnding(rows, 2, 62)).toEqual({ first: 1, height: 62 });
+  });
+
+  it('copes with an empty list', () => {
+    expect(wholeRowsEnding([], 0, 100)).toEqual({ first: 0, height: 0 });
   });
 });

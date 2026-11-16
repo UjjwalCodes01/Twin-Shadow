@@ -39,13 +39,32 @@ export const blockText = (count: number): string => `${count} ${count === 1 ? 'b
 export const recordText = ({ blocks, underPar }: Result['record']): string =>
   `Community best: ${blockText(blocks)}${underPar ? ' (under par)' : ''}`;
 
+/**
+ * The rows that fit in `room` when the row at `last` must be the final one
+ * showing: which row comes first, and their height together. Always whole
+ * rows, and always at least the last one.
+ */
+export const wholeRowsEnding = (
+  heights: readonly number[],
+  last: number,
+  room: number
+): { first: number; height: number } => {
+  let first = Math.min(Math.max(last, 0), Math.max(heights.length - 1, 0));
+  let height = heights[first] ?? 0;
+  while (first > 0 && height + (heights[first - 1] ?? 0) <= room) {
+    first -= 1;
+    height += heights[first] ?? 0;
+  }
+  return { first, height };
+};
+
 /** Where the Share button stands. */
 export type ShareState = 'ready' | 'sharing' | 'shared' | 'failed';
 
 const SHARE_BUTTON_TEXT: Record<ShareState, string> = {
   ready: 'Share result',
   sharing: 'Sharing\u2026',
-  shared: 'Shared \u2713',
+  shared: 'Shared',
   failed: 'Retry share',
 };
 
@@ -146,6 +165,8 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
     shareState = state;
     shareButton.textContent = shareButtonText(state);
     shareButton.disabled = !canShare(state);
+    // "Shared" carries a drawn tick.
+    shareButton.classList.toggle('ticked', state === 'shared');
   };
 
   const setJoinBusy = (busy: boolean, text: string): void => {
@@ -178,10 +199,29 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
     }
   };
 
-  /** On a short screen the list is clipped: scroll just far enough to show the player's row. */
+  /**
+   * On a short screen the list is clipped. It is cut to whole rows, never
+   * through the middle of one, and scrolled so the player's row is the last
+   * one showing.
+   */
   const revealOwnRow = (): void => {
-    const own = list.querySelector('.you');
-    list.scrollTop = own instanceof HTMLElement ? own.offsetTop + own.offsetHeight - list.clientHeight : 0;
+    // Back to the height the card gives it, to measure how much room there is.
+    list.style.height = '';
+    const rows = [...list.children].filter((row): row is HTMLElement => row instanceof HTMLElement);
+    const own = rows.find((row) => row.classList.contains('you'));
+    const room = list.clientHeight;
+    if (rows.length === 0 || list.scrollHeight <= room + 1) {
+      list.scrollTop = 0;
+      return;
+    }
+    // Count back from the player's row (or the last row) for as many whole rows as fit.
+    const last = own ? rows.indexOf(own) : rows.length - 1;
+    const bottom = wholeRowsEnding(rows.map((row) => row.offsetHeight), last, room);
+    const first = rows[bottom.first];
+    const end = rows[last];
+    if (!first || !end) return;
+    list.style.height = `${bottom.height + (list.offsetHeight - list.clientHeight)}px`;
+    list.scrollTop = first.offsetTop;
   };
 
   const refresh = (): void => {
@@ -237,6 +277,14 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
   shareButton.addEventListener('click', (tap) => void onShare(tap), { signal: listeners.signal });
   joinYes.addEventListener('click', (tap) => void onJoin(tap), { signal: listeners.signal });
   joinNo.addEventListener('click', onDismiss, { signal: listeners.signal });
+  // The room for the list changes when the screen turns or resizes; cut it to whole rows again.
+  window.addEventListener(
+    'resize',
+    () => {
+      if (!layer.hidden && !body.hidden) revealOwnRow();
+    },
+    { signal: listeners.signal }
+  );
   retry.addEventListener('click', refresh, { signal: listeners.signal });
   close.addEventListener('click', hide, { signal: listeners.signal });
   gallery.addEventListener(

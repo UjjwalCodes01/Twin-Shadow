@@ -52,7 +52,17 @@
         <p id="notice-text">Loading puzzle&hellip;</p>
         <button id="retry" type="button" hidden>Retry</button>
       </div>
+      <button class="how" id="how-to-play" type="button" aria-label="How to play" title="How to play" hidden>?</button>
     </main>
+
+    <!-- One hint at a time, in its own row so it never covers the board. -->
+    <aside class="hint" id="hint" aria-live="polite" hidden>
+      <div class="hint-slip empty" id="hint-slip">
+        <p class="hint-text" id="hint-text"></p>
+        <button class="hint-action" id="hint-action" type="button" hidden></button>
+      </div>
+      <button class="hint-skip" id="hint-skip" type="button" hidden>Skip</button>
+    </aside>
 
     <footer class="controls">
       <div class="mode" role="group" aria-label="Tap mode">

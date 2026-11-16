@@ -14,10 +14,12 @@ import {
 import type { Submission } from '../shared/api';
 import type { Puzzle } from '../shared/puzzle';
 import { sortBlocks, starsFor } from '../shared/score';
-import { paintWall, type WallKind } from './paint';
+import { motionNow, prefersReducedMotion } from './motion';
+import { createCrossFade, paintWall, type CrossFade, type WallKind } from './paint';
 import { blockText } from './result';
 import { showStars, starRow, starsLabel } from './stars';
 import type { GameState, Store } from './store';
+import { THEME } from './theme';
 
 export type SubmitOutcome = { ok: true; submission: Submission } | { ok: false; message: string };
 
@@ -30,6 +32,8 @@ export type HudOptions = {
   submit: (blocks: string[]) => Promise<SubmitOutcome>;
   /** Opens the result card, or null for a game that has no results (a debug puzzle). */
   openResult: (() => void) | null;
+  /** True for the warm-up: there is nothing to submit, so the button is not shown at all. */
+  practice?: boolean;
 };
 
 /** Longest side of a silhouette panel, in CSS px. */
@@ -42,7 +46,8 @@ const RESET_CONFIRM_MS = 3000;
 type Panel = {
   root: HTMLElement;
   kind: WallKind;
-  context: CanvasRenderingContext2D | null;
+  /** The canvas, wrapped so that a new picture fades in over the old one. */
+  fade: CrossFade | null;
   columns: number;
   rows: number;
   /** Canvas pixels per cell, and per CSS pixel. */
@@ -90,25 +95,46 @@ const buildPanel = (id: string, kind: WallKind, columns: number, rows: number): 
   // The panel's section already says which shadow this is.
   canvas.setAttribute('aria-hidden', 'true');
   holder.replaceChildren(canvas);
-  return { root, kind, context: canvas.getContext('2d'), columns, rows, cell: cellPx * ratio, ratio, last: '' };
+  const context = canvas.getContext('2d');
+  return {
+    root,
+    kind,
+    fade: context ? createCrossFade(context) : null,
+    columns,
+    rows,
+    cell: cellPx * ratio,
+    ratio,
+    last: '',
+  };
 };
 
-/** `states` is indexed [y][column] with y = 0 at the floor, as the rules give it. */
-const paintPanel = (panel: Panel, states: CellState[][]): void => {
+/**
+ * `states` is indexed [y][column] with y = 0 at the floor, as the rules give
+ * it. New shadow fades in over `fadeMs`, as it does on the wall. Returns
+ * whether anything was painted.
+ */
+const paintPanel = (panel: Panel, states: CellState[][], depth: number, fadeMs: number): boolean => {
   const solved = states.every((row) => row.every((state) => state === 'match' || state === 'empty'));
   panel.root.classList.toggle('solved', solved);
-  const signature = JSON.stringify(states);
-  if (!panel.context || signature === panel.last) return;
+  const signature = `${depth}|${JSON.stringify(states)}`;
+  if (!panel.fade || signature === panel.last) return false;
   panel.last = signature;
-  paintWall(panel.context, {
-    kind: panel.kind,
-    columns: panel.columns,
-    rows: panel.rows,
-    cell: panel.cell,
-    // The painter wants the top row first.
-    states: [...states].reverse(),
-    unit: panel.ratio,
-  });
+  panel.fade.show(
+    (context) =>
+      paintWall(context, {
+        kind: panel.kind,
+        columns: panel.columns,
+        rows: panel.rows,
+        cell: panel.cell,
+        // The painter wants the top row first.
+        states: [...states].reverse(),
+        unit: panel.ratio,
+        depth,
+      }),
+    motionNow(),
+    fadeMs
+  );
+  return true;
 };
 
 /** Wires the HUD to one game. Returns a function that unwires it again. */
@@ -130,6 +156,25 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
   const removeButton = button('mode-remove');
   const undoButton = button('undo');
   const resetButton = button('reset');
+
+  // The panels move with the walls: shadow fades in and out over the same
+  // time, and deepens for the same moment when the sculpture is first solved.
+  const reduced = prefersReducedMotion();
+  const shadowMs = reduced ? THEME.motion.reduced.shadowMs : THEME.motion.shadowMs;
+  let panelFrame = 0;
+  const stepPanels = (): void => {
+    panelFrame = 0;
+    const now = motionNow();
+    frontPanel.fade?.step(now);
+    sidePanel.fade?.step(now);
+    // Frames keep coming only while a fade is under way.
+    if (frontPanel.fade?.fading() || sidePanel.fade?.fading()) panelFrame = requestAnimationFrame(stepPanels);
+  };
+  let deepTimer = 0;
+  let deep = false;
+  let wasSolved: boolean | null = null;
+  /** The stars last drawn on the live rating, so they appear one after another only when they change. */
+  let starsShown = 0;
 
   // One signal removes every listener when the game is replaced.
   const listeners = new AbortController();
@@ -193,12 +238,15 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     }
     // Live rating for the sculpture on the board, until a result is recorded.
     starsLine.hidden = !solved || submission !== null;
-    if (solved) {
+    if (!solved) starsShown = 0;
+    else {
       const stars = starsFor(blocks.size, puzzle.par);
-      showStars(starsLine, stars);
+      // Redrawn only when the rating changes: drawing them is what makes them appear in turn.
+      if (stars !== starsShown) showStars(starsLine, stars);
+      starsShown = stars;
     }
 
-    submitButton.hidden = submission !== null;
+    submitButton.hidden = submission !== null || options.practice === true;
     submitButton.disabled = !solved || submitting || options.submitBlocked !== null;
     submitButton.textContent = submitText(solved, submitting, blocks.size);
     // The button shows the count alone; read aloud, it says what the number is.
@@ -223,8 +271,22 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
 
   const render = (state: GameState): void => {
     const { blocks, mode, undoStack, viewing } = state;
-    paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget));
-    paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget));
+    const solvedNow = isSolved(blocks, puzzle);
+    // The moment the sculpture first becomes a valid solve: both shadows
+    // deepen, then ease back. Not when it was found solved, nor for someone else's.
+    if (solvedNow && wasSolved === false && !viewing && !reduced) {
+      deep = true;
+      window.clearTimeout(deepTimer);
+      deepTimer = window.setTimeout(() => {
+        deep = false;
+        render(store.getState());
+      }, THEME.motion.solve.holdMs);
+    }
+    wasSolved = solvedNow;
+    const depth = deep ? THEME.motion.solve.deepen : 1;
+    const front = paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget), depth, shadowMs);
+    const side = paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget), depth, shadowMs);
+    if ((front || side) && panelFrame === 0) panelFrame = requestAnimationFrame(stepPanels);
 
     countBlocks.textContent = blockText(blocks.size);
     countPar.textContent = `par ${puzzle.par}`;
@@ -233,7 +295,7 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     floatingWarning.hidden = floating === 0;
     floatingWarning.textContent = `${floating} floating`;
 
-    renderSubmit(blocks, isSolved(blocks, puzzle), viewing);
+    renderSubmit(blocks, solvedNow, viewing);
 
     addButton.setAttribute('aria-pressed', String(mode === 'add'));
     removeButton.setAttribute('aria-pressed', String(mode === 'remove'));
@@ -252,5 +314,7 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     unsubscribe();
     listeners.abort();
     disarmReset();
+    window.clearTimeout(deepTimer);
+    if (panelFrame !== 0) cancelAnimationFrame(panelFrame);
   };
 };

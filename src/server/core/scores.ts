@@ -93,6 +93,13 @@ const shownStreak = (streak: Streak, newest: number): Result['streak'] => ({
   best: streak.best,
 });
 
+/** A player's streak of daily puzzles as it stands now: 0 once the latest finished one was missed. */
+export const currentStreak = async (userId: string): Promise<number> =>
+  shownStreak(await readStreak(userId), await newestDaily()).current;
+
+/** How many players have submitted a solution for a post. */
+export const solverCount = (postId: string): Promise<number> => redis.hLen(KEYS.submissions(postId));
+
 // --- Counting a solve ------------------------------------------------------------
 
 type CountStep = 'board' | 'tally' | 'sculpture';

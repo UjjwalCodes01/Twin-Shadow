@@ -25,6 +25,47 @@ export type PuzzleResponse = {
   submission: Submission | null;
   /** True only in the app's dev subreddit. Unlocks the temporary debug states. */
   debug: boolean;
+  /** What a first-time player has still to be shown. Both true for a logged-out visitor. */
+  onboarding: Onboarding;
+};
+
+/** What a player has still to be shown the first time: each is true until it has happened. */
+export type Onboarding = {
+  /** The warm-up puzzle with its hints, until it is finished or skipped. */
+  warmup: boolean;
+  /** The hint shown the first time a sculpture on a real puzzle is a valid solve. */
+  solveHint: boolean;
+};
+
+export const ONBOARDING_EVENTS = ['warmup-finished', 'warmup-skipped', 'solve-hint-seen'] as const;
+/** Something a first-time player has now done or seen, to be remembered. */
+export type OnboardingEvent = (typeof ONBOARDING_EVENTS)[number];
+
+/** Body of POST /api/onboarding. */
+export type OnboardingRequest = { event: OnboardingEvent };
+
+/** Response of POST /api/onboarding. `failed` means the event was not recorded. */
+export type OnboardingResponse = { status: 'ok' } | { status: 'failed'; message: string };
+
+/**
+ * Response of GET /api/splash: what the inline view in the feed shows. The two
+ * silhouettes are the puzzle as every player sees it; nothing here helps to
+ * solve it beyond them, and nothing belongs to any other player.
+ */
+export type SplashResponse = {
+  /** The N in "Puzzle #N". */
+  number: number;
+  /** UTC date the post was made, YYYY-MM-DD. */
+  date: string;
+  size: Size;
+  front: string[];
+  side: string[];
+  /** The caller's own result, or null when they have not solved it or are logged out. */
+  played: { blocks: number; par: number; stars: Stars } | null;
+  /** The caller's current streak of daily puzzles, or null when logged out. */
+  streak: number | null;
+  /** How many players have solved this post. */
+  solvers: number;
 };
 
 /** Body of POST /api/submit. */
@@ -229,15 +270,52 @@ export const parseSubmission = (value: unknown): Submission | null => {
   return { blocks, par, stars, sculpture: [...sculpture] };
 };
 
+const parseOnboarding = (value: unknown): Onboarding | null => {
+  if (!isRecord(value)) return null;
+  const { warmup, solveHint } = value;
+  return typeof warmup === 'boolean' && typeof solveHint === 'boolean' ? { warmup, solveHint } : null;
+};
+
 export const parsePuzzleResponse = (value: unknown): PuzzleResponse | null => {
   if (!isRecord(value)) return null;
   const { debug, canSubmit } = value;
   if (typeof debug !== 'boolean' || typeof canSubmit !== 'boolean') return null;
   const puzzle = parsePuzzle(value.puzzle);
   if (!puzzle) return null;
-  if (value.submission === null) return { puzzle, canSubmit, submission: null, debug };
+  const onboarding = parseOnboarding(value.onboarding);
+  if (!onboarding) return null;
+  if (value.submission === null) return { puzzle, canSubmit, submission: null, debug, onboarding };
   const submission = parseSubmission(value.submission);
-  return submission ? { puzzle, canSubmit, submission, debug } : null;
+  return submission ? { puzzle, canSubmit, submission, debug, onboarding } : null;
+};
+
+export const parseOnboardingRequest = (value: unknown): OnboardingRequest | null => {
+  if (!isRecord(value)) return null;
+  const event = ONBOARDING_EVENTS.find((known) => known === value.event);
+  return event ? { event } : null;
+};
+
+export const parseOnboardingResponse = (value: unknown): OnboardingResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'ok') return { status: 'ok' };
+  if (value.status === 'failed' && typeof value.message === 'string') return { status: 'failed', message: value.message };
+  return null;
+};
+
+export const parseSplashResponse = (value: unknown): SplashResponse | null => {
+  if (!isRecord(value)) return null;
+  const { number, date, played, streak, solvers } = value;
+  if (!isCount(number) || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  // The silhouettes are checked exactly as a puzzle's are.
+  const puzzle = parsePuzzle({ id: 'splash', number, tier: 1, par: 0, size: value.size, front: value.front, side: value.side });
+  if (!puzzle) return null;
+  if (!isCount(solvers) || (streak !== null && !isCount(streak))) return null;
+  let own: SplashResponse['played'] = null;
+  if (played !== null) {
+    if (!isRecord(played) || !isCount(played.blocks) || !isCount(played.par) || !isStars(played.stars)) return null;
+    own = { blocks: played.blocks, par: played.par, stars: played.stars };
+  }
+  return { number, date, size: puzzle.size, front: puzzle.front, side: puzzle.side, played: own, streak, solvers };
 };
 
 /**

@@ -8,7 +8,7 @@ type ThemeModule = typeof import('./src/client/theme');
 const THEME_FILE = new URL('./src/client/theme.ts', import.meta.url).href;
 
 /**
- * Writes the theme's HUD values into game.css as it is built. The values
+ * Writes the theme's HUD values into game.css and splash.css as they are built. The values
  * still live only in src/client/theme.ts; this puts a copy where the browser
  * reads it before any script has run, so the page is never shown unstyled.
  */
@@ -23,8 +23,10 @@ const themeDefaults = (): Plugin => {
       defaults = `:root {\n${values.join('\n')}\n}\n\n`;
     },
     transform(code, id) {
-      // The stylesheet itself only: a test that reads it as text gets it as written.
-      if (id.includes('?raw') || !id.split('?')[0]?.endsWith('/src/client/game.css')) return null;
+      // The two stylesheets themselves only: a test that reads one as text gets it as written.
+      const file = id.split('?')[0] ?? '';
+      const themed = file.endsWith('/src/client/game.css') || file.endsWith('/src/client/splash.css');
+      if (id.includes('?raw') || !themed) return null;
       return { code: defaults + code, map: null };
     },
   };

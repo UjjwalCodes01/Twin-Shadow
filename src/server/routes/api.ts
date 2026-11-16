@@ -4,18 +4,21 @@ import type {
   DebugPuzzleResponse,
   GalleryResponse,
   JoinResponse,
+  OnboardingResponse,
   PuzzleResponse,
   ResultResponse,
   ShareResponse,
+  SplashResponse,
   SubmitRejection,
   SubmitResponse,
 } from '../../shared/api';
-import { isGallerySort, parseJoinRequest, parseSubmitRequest } from '../../shared/api';
+import { isGallerySort, parseJoinRequest, parseOnboardingRequest, parseSubmitRequest } from '../../shared/api';
 import { isSolved } from '../../shared/logic';
 import { isDevSubreddit } from '../core/dev';
 import { loadPost, type PostRecord } from '../core/posts';
 import { QUEUE, puzzleByNumber } from '../core/queue';
-import { acceptSubmission, buildGallery, buildResult } from '../core/scores';
+import { BRAND_NEW, getOnboarding, recordOnboarding } from '../core/onboarding';
+import { acceptSubmission, buildGallery, buildResult, currentStreak, solverCount } from '../core/scores';
 import { answerJoinPrompt, shareResult } from '../core/share';
 import { getStored, getSubmission } from '../core/submissions';
 
@@ -45,7 +48,44 @@ api.get('/puzzle', async (c) => {
     // Read with the caller's own id, so nobody receives another player's sculpture.
     submission: userId ? await getSubmission(current.postId, userId, puzzle) : null,
     debug: isDevSubreddit(subredditName),
+    // A logged-out visitor has no record, so counts as new; the client remembers for them.
+    onboarding: userId ? await getOnboarding(userId) : BRAND_NEW,
   });
+});
+
+// What the inline view in the feed shows: the post's number and date, the two
+// silhouettes, how many have solved it, and the caller's own result and
+// streak. The silhouettes are what every player is shown anyway; no
+// sculpture, no par before solving, and nothing of any other player's.
+api.get('/splash', async (c) => {
+  const { userId } = context;
+  const current = await currentPost();
+  if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  const { postId, post } = current;
+  const { puzzle } = post;
+  const own = userId ? await getSubmission(postId, userId, puzzle) : null;
+  return c.json<SplashResponse>({
+    number: post.number,
+    date: post.date,
+    size: puzzle.size,
+    front: puzzle.front,
+    side: puzzle.side,
+    played: own ? { blocks: own.blocks, par: own.par, stars: own.stars } : null,
+    streak: userId ? await currentStreak(userId) : null,
+    solvers: await solverCount(postId),
+  });
+});
+
+// Remembers that a first-time player has finished or skipped the warm-up, or
+// has seen the first-solve hint, so neither is shown to them again.
+api.post('/onboarding', async (c) => {
+  const { userId } = context;
+  if (!userId) return c.json<OnboardingResponse>({ status: 'failed', message: 'Log in to be remembered.' }, 401);
+  const body: unknown = await c.req.json().catch(() => null);
+  const request = parseOnboardingRequest(body);
+  if (!request) return c.json<OnboardingResponse>({ status: 'failed', message: 'That could not be read.' }, 400);
+  await recordOnboarding(userId, request.event);
+  return c.json<OnboardingResponse>({ status: 'ok' });
 });
 
 const REJECTIONS: Record<SubmitRejection, { status: 400 | 401 | 404 | 422; message: string }> = {

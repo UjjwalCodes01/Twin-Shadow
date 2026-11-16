@@ -10,19 +10,26 @@ import {
   type Gallery,
   type GallerySort,
   type JoinChoice,
+  type Onboarding,
+  type OnboardingEvent,
   type Result,
   type Submission,
 } from '../shared/api';
-import type { Puzzle } from '../shared/puzzle';
+import { diffShadow, isSolved, parseSilhouette, projectFront, projectSide } from '../shared/logic';
+import { TEST_PUZZLE, TEST_SOLUTION, type Puzzle } from '../shared/puzzle';
 import { DEBUG_STATES, debugSetup } from './debug';
 import { createGallery, type GalleryHandle } from './gallery';
+import { createHintBar } from './hintBar';
+import { createHints, HINT_TEXT, SOLVE_HINT_TEXT, WARMUP_DONE_LABEL } from './hints';
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
 import { journeys, NO_JOURNEY } from './journey';
+import { setMotionClock } from './motion';
 import { createResultCard, type ActionOutcome, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
 import { createStore, type Store } from './store';
 import { applyTheme } from './theme';
+import { afterEvent, needsSolveHint, needsWarmup, readRemembered, remember } from './warmup';
 
 const PUZZLE_URL = '/api/puzzle';
 const SUBMIT_URL = '/api/submit';
@@ -47,7 +54,12 @@ type GameOptions = {
   submitBlocked?: string | null;
   /** True for the post's own puzzle, which has results. A debug puzzle has none. */
   results?: boolean;
+  /** True for the warm-up: the test puzzle with hints, never submitted or scored. */
+  warmup?: boolean;
 };
+
+/** Said under the count during the warm-up, where Submit would be. */
+const WARMUP_NOTE = 'Warm-up: nothing here is scored';
 
 const element = (id: string): HTMLElement => {
   const found = document.getElementById(id);
@@ -184,6 +196,117 @@ const answerJoin = async (choice: JoinChoice, tap: Event): Promise<ActionOutcome
 
 let game: Game | null = null;
 
+// --- Warm-up and hints ---------------------------------------------------------
+// A first-time player gets the small test puzzle first, with hints that come
+// one at a time and go when the player has done what they say. It is never
+// submitted or scored, and it can be skipped. Whether a player has had it is
+// remembered on the server and on this device.
+
+const hintBar = createHintBar();
+const howButton = element('how-to-play');
+
+/** What the server says this player has still to be shown, once the puzzle has loaded. */
+let onboarding: Onboarding | null = null;
+/** What this device remembers them having had. */
+let remembered = readRemembered();
+/** The day's puzzle and how to start it: kept while the warm-up is on the board, to come back to. */
+let day: { puzzle: Puzzle; options: GameOptions } | null = null;
+
+const rememberEvent = (event: OnboardingEvent): void => {
+  remembered = afterEvent(remembered, event);
+  remember(event);
+};
+
+/** Puts the warm-up on the board. The day's board is kept exactly as it stands. */
+const startWarmup = (): void => {
+  if (game && day) {
+    const { blocks, rotation } = game.store.getState();
+    day.options = { ...day.options, blocks: [...blocks], rotation };
+  }
+  startGame(TEST_PUZZLE, { warmup: true, submitBlocked: WARMUP_NOTE });
+};
+
+/** Ends the warm-up, remembers how, and goes on (or back) to the day's puzzle. */
+const endWarmup = (event: 'warmup-finished' | 'warmup-skipped'): void => {
+  rememberEvent(event);
+  if (day) startGame(day.puzzle, day.options);
+};
+
+howButton.addEventListener('click', startWarmup);
+
+/**
+ * Runs the warm-up's hints for one game. Returns a function that stops them.
+ * A hint never takes a tap: it is a line under the board, and a light on one tile.
+ */
+const runWarmupHints = (puzzle: Puzzle, store: Store, scene: SceneHandle): (() => void) => {
+  const hints = createHints();
+  const frontTarget = parseSilhouette(puzzle.front);
+  const sideTarget = parseSilhouette(puzzle.side);
+  const startRotation = store.getState().rotation;
+  let turned = false;
+  // The first tile pointed at is one the known solution uses, so the hint starts the player well.
+  const firstTile = TEST_SOLUTION.find((key) => key.split(',')[1] === '0') ?? '0,0,0';
+
+  const refresh = (): void => {
+    const { blocks, rotation } = store.getState();
+    if (rotation !== startRotation) turned = true;
+    const shadows = [
+      ...diffShadow(projectFront(blocks, puzzle.size), frontTarget),
+      ...diffShadow(projectSide(blocks, puzzle.size), sideTarget),
+    ];
+    const hint = hints.update({
+      blocks: blocks.size,
+      extra: shadows.some((row) => row.includes('extra')),
+      rotated: turned,
+      solved: isSolved(blocks, puzzle),
+    });
+    scene.setPulse(hint === 'place' ? firstTile : null);
+    if (hint === null) hintBar.clear();
+    else if (hint === 'solved') {
+      hintBar.show(HINT_TEXT.solved, { label: WARMUP_DONE_LABEL, run: () => endWarmup('warmup-finished') });
+    } else hintBar.show(HINT_TEXT[hint]);
+  };
+
+  hintBar.open(() => endWarmup('warmup-skipped'));
+  const unsubscribe = store.subscribe(refresh);
+  refresh();
+  return () => {
+    unsubscribe();
+    hintBar.close();
+  };
+};
+
+/**
+ * On a real puzzle, a new player gets one hint, the first time their
+ * sculpture is a valid solve. It goes when they change the sculpture or
+ * submit. Returns a function that stops watching.
+ */
+const runSolveHint = (puzzle: Puzzle, store: Store): (() => void) => {
+  /** The sculpture the hint was shown for, while it is showing. */
+  let shownFor: ReadonlySet<string> | null = null;
+  let given = false;
+  const unsubscribe = store.subscribe((state) => {
+    if (shownFor) {
+      // The player has trimmed, added or turned to someone else's sculpture: the hint has done its work.
+      if (state.blocks !== shownFor || state.viewing) {
+        shownFor = null;
+        hintBar.close();
+      }
+      return;
+    }
+    if (given || state.viewing || !isSolved(state.blocks, puzzle)) return;
+    given = true;
+    shownFor = state.blocks;
+    rememberEvent('solve-hint-seen');
+    hintBar.open(null);
+    hintBar.show(SOLVE_HINT_TEXT);
+  });
+  return () => {
+    unsubscribe();
+    if (shownFor) hintBar.close();
+  };
+};
+
 /** Starts a game on a fresh canvas, replacing any game already running. */
 const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   game?.stop();
@@ -221,27 +344,54 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
       },
       answerJoin,
     });
-    // Registered after the scene asked for its first frame, so this runs
-    // once that frame has been drawn.
-    requestAnimationFrame(() => journeys.boardDrawn());
   }
+  // The app is ready once a board a player can use has been drawn: the day's
+  // puzzle or the warm-up, never a debug state. Registered after the scene
+  // asked for its first frame, so this runs once that frame has been drawn.
+  if (options.results || options.warmup) requestAnimationFrame(() => journeys.boardDrawn());
+
+  // Hints: the warm-up has its own run of them; a real puzzle has one, for a
+  // player who has not yet seen it and has not already submitted.
+  let stopHints = (): void => {};
+  if (options.warmup) stopHints = runWarmupHints(puzzle, store, scene);
+  else if (options.results && onboarding && needsSolveHint(onboarding, remembered, Boolean(options.submission))) {
+    stopHints = runSolveHint(puzzle, store);
+  }
+
   const removeHud = createHud(puzzle, store, {
     submission: options.submission ?? null,
     submitBlocked: options.submitBlocked ?? null,
     submit: async (blocks) => {
       const outcome = await submitSculpture(blocks);
-      if (outcome.ok) journey.submitted(outcome.submission.stars);
+      if (outcome.ok) {
+        journey.submitted(outcome.submission.stars);
+        // Submitted: any hint about submitting has done its work.
+        stopHints();
+        stopHints = (): void => {};
+      }
       return outcome;
     },
     openResult: card ? () => card?.open() : null,
+    practice: options.warmup === true,
   });
   attachInput(canvas, puzzle, store, scene);
+
+  // "How to play" replays the warm-up. It is offered on the day's puzzle
+  // only, and not while someone else's sculpture is on the board.
+  const showHow = (): void => {
+    howButton.hidden = !options.results || store.getState().viewing;
+  };
+  const stopHow = store.subscribe(showHow);
+  showHow();
 
   game = {
     store,
     scene,
     stop: () => {
       journey.stop();
+      stopHints();
+      stopHow();
+      howButton.hidden = true;
       removeHud();
       gallery?.dispose();
       card?.dispose();
@@ -335,6 +485,18 @@ const showDebugBar = (): void => {
     twinShadowsDebug: {
       load: loadDebugState,
       render: () => game?.scene.renderNow(),
+      // The warm-up on demand, and a way to make this device forget it has been had.
+      warmup: startWarmup,
+      forget: () => {
+        remembered = { warmup: false, solveHint: false };
+        try {
+          localStorage.removeItem('twin-shadows.onboarding');
+        } catch {
+          // Nothing to forget where storage is unavailable.
+        }
+      },
+      // Holds the board's animations at a chosen time, to photograph them frame by frame; null lets time run again.
+      freezeAt: (time: number | null) => setMotionClock(time === null ? null : () => time),
       // For screenshots of the two looks that only a pointer or a refused tap brings up.
       ghost: (key: string | null) => game?.scene.setGhost(key),
       flash: (key: string) => game?.scene.flashBlock(key),
@@ -363,13 +525,20 @@ async function loadPostPuzzle(): Promise<void> {
     const parsed = parsePuzzleResponse(body);
     if (!parsed) throw new Error('Response is not a valid puzzle');
     const { puzzle, submission, canSubmit, debug } = parsed;
-    startGame(puzzle, {
-      // A returning player gets their submitted sculpture back on the board.
-      blocks: submission?.sculpture ?? [],
-      submission,
-      submitBlocked: canSubmit ? null : 'Log in to submit',
-      results: true,
-    });
+    onboarding = parsed.onboarding;
+    day = {
+      puzzle,
+      options: {
+        // A returning player gets their submitted sculpture back on the board.
+        blocks: submission?.sculpture ?? [],
+        submission,
+        submitBlocked: canSubmit ? null : 'Log in to submit',
+        results: true,
+      },
+    };
+    // A player neither the server nor this device has seen before starts with the warm-up.
+    if (needsWarmup(parsed.onboarding, remembered, submission !== null)) startWarmup();
+    else startGame(day.puzzle, day.options);
     if (debug) showDebugBar();
   } catch (error) {
     game?.stop();

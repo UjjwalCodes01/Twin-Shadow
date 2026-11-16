@@ -96,6 +96,7 @@ export const createFakeDevvit = () => {
       return removed;
     },
     hGetAll: async (key: string): Promise<Record<string, string>> => Object.fromEntries(hash(key)),
+    hLen: async (key: string): Promise<number> => hash(key).size,
     hMGet: async (key: string, fields: string[]): Promise<(string | null)[]> =>
       fields.map((field) => hash(key).get(field) ?? null),
     hIncrBy: async (key: string, field: string, value: number): Promise<number> => {

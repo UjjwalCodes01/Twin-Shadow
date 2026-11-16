@@ -23,6 +23,73 @@ export type WallPaint = {
    * the screen's pixel ratio for a panel, so thin lines never vanish.
    */
   unit: number;
+  /**
+   * How much deeper than usual the shadow is: 1 as a rule, a little more for
+   * the moment a sculpture first becomes a valid solve.
+   */
+  depth?: number;
+};
+
+/**
+ * A canvas whose picture fades from the old one to the new one instead of
+ * switching. Used for the walls and the panels, so shadow arrives and leaves
+ * softly on both together.
+ */
+export type CrossFade = {
+  /**
+   * Paints a new picture. With `ms` above 0 it fades in over what is showing;
+   * otherwise it is simply shown. The first picture is always simply shown.
+   */
+  show: (paint: (context: Context) => void, now: number, ms: number) => void;
+  /** Brings the canvas up to date for the time `now`. Returns whether it changed. */
+  step: (now: number) => boolean;
+  /** True while a fade is under way. */
+  fading: () => boolean;
+};
+
+export const createCrossFade = (display: Context): CrossFade => {
+  const { width, height } = display.canvas;
+  const layer = (): Context | null => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas.getContext('2d');
+  };
+  // The picture being left and the picture being arrived at. Made only when first needed.
+  let from: Context | null = null;
+  let to: Context | null = null;
+  let shown = false;
+  let fade: { startedAt: number; ms: number } | null = null;
+
+  return {
+    show: (paint, now, ms) => {
+      from ??= layer();
+      to ??= layer();
+      if (!shown || ms <= 0 || !from || !to) {
+        shown = true;
+        fade = null;
+        paint(display);
+        return;
+      }
+      // Whatever is showing now, even half way through an earlier fade, is what is left behind.
+      from.clearRect(0, 0, width, height);
+      from.drawImage(display.canvas, 0, 0);
+      paint(to);
+      fade = { startedAt: now, ms };
+    },
+    step: (now) => {
+      if (!fade || !from || !to) return false;
+      const progress = Math.min(Math.max((now - fade.startedAt) / fade.ms, 0), 1);
+      display.clearRect(0, 0, width, height);
+      display.drawImage(from.canvas, 0, 0);
+      display.globalAlpha = progress;
+      display.drawImage(to.canvas, 0, 0);
+      display.globalAlpha = 1;
+      if (progress >= 1) fade = null;
+      return true;
+    },
+    fading: () => fade !== null,
+  };
 };
 
 /** The table to paint, seen from above with the back row at the top. */
@@ -181,11 +248,14 @@ export const paintWall = (context: Context, paint: WallPaint): void => {
   if (paper) context.drawImage(paper, 0, 0);
   else paintPaper(context, paint);
 
-  // The ruling a little firmer inside the wanted shape, so its cells can still be counted.
+  // The inside of the wanted shape: a faint wash of its lamp's colour, and
+  // the ruling a little firmer, so its cells can still be counted.
   if (target.length > 0) {
     context.save();
     tracePath(context, target, cell);
     context.clip();
+    context.fillStyle = rgba(kind === 'front' ? look.wash.front : look.wash.side, look.wash.alpha);
+    context.fillRect(0, 0, width, height);
     context.lineWidth = weight(look.grid.weight, look.grid.minPx);
     context.strokeStyle = rgba(look.grid.color, look.grid.insideAlpha);
     ruleCells(context, columns, rows, cell);
@@ -194,7 +264,8 @@ export const paintWall = (context: Context, paint: WallPaint): void => {
 
   // The cast shadow: every lit cell as one soft, see-through shape.
   const shadow = kind === 'front' ? look.shadow.front : look.shadow.side;
-  softFill(context, lit, cell, rgba(shadow, look.shadow.alpha), look.shadow.blur * cell);
+  const depth = Math.min(look.shadow.alpha * (paint.depth ?? 1), 0.96);
+  softFill(context, lit, cell, rgba(shadow, depth), look.shadow.blur * cell);
 
   // Shadow that falls where it should not: tinted red, and struck through
   // with pencil so it reads as wrong without its colour.

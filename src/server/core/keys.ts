@@ -91,4 +91,11 @@ export const KEYS = {
    * "Join the community" prompt. A player with an answer is never asked again.
    */
   joinPrompt: 'prompts:join',
+
+  /**
+   * Hash, user id -> JSON: what a first-time player has been through. Holds
+   * how the warm-up ended ('finished' or 'skipped') and whether the
+   * first-solve hint has been seen. A player with no field is brand new.
+   */
+  onboarding: 'onboarding',
 } as const;

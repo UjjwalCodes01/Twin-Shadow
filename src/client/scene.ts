@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import {
   diffShadow,
   findFloating,
+  isSolved,
   parseKey,
   parseSilhouette,
   projectFront,
@@ -21,7 +22,8 @@ import {
 } from '../shared/logic';
 import type { Puzzle } from '../shared/puzzle';
 import { BLOCK_FACES, blockGeometry, createBlockShape, FACE_KINDS, type FaceKind } from './blockGeometry';
-import { paintTable, paintWall, paintWood, type WallKind } from './paint';
+import { bobOffset, createBlockMotion, motionNow, prefersReducedMotion, type MotionStyle } from './motion';
+import { createCrossFade, paintTable, paintWall, paintWood, type CrossFade, type WallKind } from './paint';
 import { faceContacts, isUntouched, shadeAt } from './shade';
 import type { GameState, Store } from './store';
 import { pickFor, THEME } from './theme';
@@ -44,6 +46,7 @@ type BlockState = 'standing' | 'floating' | 'refused';
  * so its shading is only worked out again when that changes.
  */
 type BlockView = {
+  key: string;
   pick: THREE.Mesh;
   body: BodyMesh;
   cell: readonly [number, number, number];
@@ -51,13 +54,21 @@ type BlockView = {
   variant: number;
   state: BlockState | null;
   contacts: string;
+  /** See-through copies of its materials, while the block is fading in or out. */
+  fading: THREE.Material[] | null;
 };
 /**
  * A wall. `paint` draws it from the state of each of its cells, indexed
- * [y][column] in board order; `facing` says whether it would face the camera
- * with the board turned to an angle.
+ * [y][column] in board order, fading from what it showed before; `facing`
+ * says whether it would face the camera with the board turned to an angle;
+ * `step` carries a fade forward and says whether one is still under way.
  */
-type Wall = { shows: WallKind; paint: (states: CellState[][]) => void; facing: (angle: number) => boolean };
+type Wall = {
+  shows: WallKind;
+  paint: (states: CellState[][], now: number, depth: number, fadeMs: number) => void;
+  facing: (angle: number) => boolean;
+  step: (now: number) => boolean;
+};
 /** A canvas that a wall or the table is painted on, and the texture made from it. */
 type Painted = { context: CanvasRenderingContext2D; texture: THREE.CanvasTexture };
 type Tween = { from: number; to: number; startedAt: number | null };
@@ -74,6 +85,8 @@ export type SceneHandle = {
   isRotating: () => boolean;
   /** Shows a pencilled-in block at `key`, or hides it with null. */
   setGhost: (key: string | null) => void;
+  /** Makes the floor tile at `key` pulse gently, to point a new player at it, or stops with null. */
+  setPulse: (key: string | null) => void;
   /** Briefly stains a block red to show a tap on it was refused. */
   flashBlock: (key: string) => void;
   /** Draws immediately instead of on the next frame. */
@@ -89,6 +102,11 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   const frontTarget = parseSilhouette(puzzle.front);
   const sideTarget = parseSilhouette(puzzle.side);
   const look = THEME.scene;
+  const motionLook = THEME.motion;
+  // A device that asks for less motion gets no travel at all, and shorter fades.
+  const reduced = prefersReducedMotion();
+  const shadowMs = reduced ? motionLook.reduced.shadowMs : motionLook.shadowMs;
+  const blockMotion = createBlockMotion(reduced ? motionLook.reduced.swapMs : motionLook.swapMs);
 
   // The canvas is see-through: the page, with its lamplight, shows behind the board.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -198,13 +216,19 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
 
     // Out of the wall, into the room, before the board is turned.
     const inward = new THREE.Vector3(0, 0, 1).applyAxisAngle(UP, rotationY);
+    const fade: CrossFade | null = surface ? createCrossFade(surface.context) : null;
     let last = '';
     return {
       shows,
       // The material is one-sided, so the wall shows only when it faces the camera.
       facing: (angle) => inward.clone().applyAxisAngle(UP, angle).dot(CAMERA_DIRECTION) > 0,
-      paint: (states) => {
-        if (!surface) return;
+      step: (now) => {
+        if (!surface || !fade) return false;
+        if (fade.step(now)) surface.texture.needsUpdate = true;
+        return fade.fading();
+      },
+      paint: (states, now, depth, fadeMs) => {
+        if (!surface || !fade) return;
         // Into drawing order: top row first, and columns as they run across
         // this wall's face, which for two of the four walls is back to front,
         // so a shadow always falls directly behind the blocks that cast it.
@@ -216,10 +240,15 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
           }
           ordered.push(row);
         }
-        const signature = JSON.stringify(ordered);
+        const signature = `${depth}|${JSON.stringify(ordered)}`;
         if (signature === last) return;
         last = signature;
-        paintWall(surface.context, { kind: shows, columns, rows: h, cell: wallCell, states: ordered, unit: 1 });
+        // New shadow fades in and shadow that has gone fades out.
+        fade.show(
+          (context) => paintWall(context, { kind: shows, columns, rows: h, cell: wallCell, states: ordered, unit: 1, depth }),
+          now,
+          fadeMs
+        );
         surface.texture.needsUpdate = true;
       },
     };
@@ -326,11 +355,10 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
       const state: BlockState = flashing.has(key) ? 'refused' : floating.has(key) ? 'floating' : 'standing';
       if (state !== view.state) {
         view.state = state;
-        view.body.material = materialsFor(view, state);
-        // A hovering block is smaller and lifted clear of where it would sit.
-        const hovering = state === 'floating';
-        view.body.scale.setScalar(hovering ? blockLook.floating.scale : blockLook.scale);
-        view.body.position.y = hovering ? blockLook.floating.lift : 0;
+        // A block that is fading keeps its see-through materials until the fade is over.
+        if (!view.fading) view.body.material = materialsFor(view, state);
+        // A hovering block is smaller; how high it rides is set as it is posed, each frame.
+        view.body.scale.setScalar(state === 'floating' ? blockLook.floating.scale : blockLook.scale);
       }
 
       // Contact shading: darker towards whatever each face touches.
@@ -355,17 +383,62 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     return standing;
   };
 
-  const syncBlocks = (state: GameState): ReadonlySet<string> => {
-    for (const [key, view] of blockViews) {
-      if (!state.blocks.has(key)) {
-        board.remove(view.pick);
-        view.body.geometry.dispose();
-        blockViews.delete(key);
-        keyByMesh.delete(view.pick);
+  // Blocks that have been taken off the board and are still lifting or fading away.
+  const leavingViews = new Map<string, BlockView>();
+  let wasViewing = false;
+
+  /** Copies of a block's materials that can be faded. */
+  const seeThrough = (materials: THREE.Material[]): THREE.Material[] =>
+    materials.map((material) => {
+      const copy = material.clone();
+      copy.transparent = true;
+      return copy;
+    });
+
+  const startFading = (view: BlockView): void => {
+    if (view.fading) return;
+    view.fading = seeThrough(materialsFor(view, view.state ?? 'standing'));
+    view.body.material = view.fading;
+  };
+
+  const discard = (view: BlockView): void => {
+    board.remove(view.pick);
+    view.body.geometry.dispose();
+    for (const material of view.fading ?? []) material.dispose();
+  };
+
+  const syncBlocks = (state: GameState, now: number): ReadonlySet<string> => {
+    // A sculpture swapped for another, while viewing or on the way in or out
+    // of it, fades. A block the player places drops; one they remove lifts.
+    const style: MotionStyle = state.viewing || wasViewing ? 'fade' : reduced ? 'none' : 'drop';
+    wasViewing = state.viewing;
+    const { arrived, left } = blockMotion.sync(state.blocks, now, style);
+
+    for (const key of left) {
+      const view = blockViews.get(key);
+      if (!view) continue;
+      // Gone from the game at once: it can no longer be tapped. Only its picture lingers.
+      blockViews.delete(key);
+      keyByMesh.delete(view.pick);
+      const earlier = leavingViews.get(key);
+      if (earlier) discard(earlier);
+      if (style === 'none') {
+        leavingViews.delete(key);
+        discard(view);
+        continue;
       }
+      startFading(view);
+      leavingViews.set(key, view);
     }
+
     for (const key of state.blocks) {
       if (blockViews.has(key)) continue;
+      // Put back while its old self was still leaving: the old one goes now.
+      const earlier = leavingViews.get(key);
+      if (earlier) {
+        discard(earlier);
+        leavingViews.delete(key);
+      }
       const { x, y, z } = parseKey(key);
       const pick = new THREE.Mesh(pickGeometry, unseenMaterial);
       pick.position.copy(cellPosition(x, y, z));
@@ -374,6 +447,7 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
       pick.add(body);
       board.add(pick);
       blockViews.set(key, {
+        key,
         pick,
         body,
         cell: [x, y, -z],
@@ -381,11 +455,67 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
         variant: pickFor(key, THEME.paint.wood.variants, 7),
         state: null,
         contacts: '',
+        fading: null,
       });
       keyByMesh.set(pick, key);
     }
-    return paintBlocks(state.blocks);
+    const standing = paintBlocks(state.blocks);
+    if (style === 'fade') {
+      for (const key of arrived) {
+        const view = blockViews.get(key);
+        if (view) startFading(view);
+      }
+    }
+    return standing;
   };
+
+  /**
+   * Puts every block where it is at the time `now`: dropping into place,
+   * lifting away, fading, or riding up and down if nothing holds it up.
+   * Returns whether anything is still moving.
+   */
+  const poseBlocks = (now: number): boolean => {
+    let moving = blockMotion.moving(now);
+    for (const view of blockViews.values()) {
+      const arrival = blockMotion.arriving(view.key, now);
+      const hovering = view.state === 'floating';
+      // A hovering block never comes to rest, unless the device asks for less motion.
+      if (hovering && !reduced) moving = true;
+      const hover = hovering ? blockLook.floating.lift + (reduced ? 0 : bobOffset(now)) : 0;
+      view.body.position.y = hover + arrival.offset;
+      if (!view.fading) continue;
+      if (arrival.moving) {
+        for (const material of view.fading) material.opacity = arrival.opacity;
+      } else {
+        // Faded all the way in: back to the materials every block shares.
+        for (const material of view.fading) material.dispose();
+        view.fading = null;
+        view.body.material = materialsFor(view, view.state ?? 'standing');
+      }
+    }
+
+    const goings = new Map(blockMotion.leaving(now).map((going) => [going.key, going]));
+    for (const [key, view] of leavingViews) {
+      const going = goings.get(key);
+      if (!going) {
+        discard(view);
+        leavingViews.delete(key);
+        continue;
+      }
+      view.body.position.y = (view.state === 'floating' ? blockLook.floating.lift : 0) + going.offset;
+      for (const material of view.fading ?? []) material.opacity = going.opacity;
+    }
+    return moving;
+  };
+
+  // The floor tile a first-time player is pointed at: a soft light that comes and goes.
+  const pulse: BasicMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.86, 0.86),
+    new THREE.MeshBasicMaterial({ color: motionLook.pulse.color, transparent: true, depthWrite: false })
+  );
+  pulse.rotation.x = -Math.PI / 2;
+  pulse.visible = false;
+  board.add(pulse);
 
   // Hover preview for mouse users: a block pencilled in, never a tap target.
   const ghost: BodyMesh = new THREE.Mesh(
@@ -402,46 +532,103 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   let ghostKey: string | null = null;
 
   // --- Rendering -----------------------------------------------------------
+  // On demand: a frame is drawn when something changes, and frames keep
+  // coming only while something is still moving. Nothing here waits for an
+  // animation: the game has already changed by the time it is drawn.
   let frame = 0;
   let tween: Tween | null = null;
+  /** The shadows as last worked out, kept so the walls can be painted again without the rules. */
+  let shadows: { front: CellState[][]; side: CellState[][] } | null = null;
+  /** Whether the sculpture was a valid solve when last looked at; null before the first look. */
+  let wasSolved: boolean | null = null;
+  /** While a sculpture has just become a valid solve, when its deepened shadows ease back; 0 otherwise. */
+  let deepUntil = 0;
 
-  const renderNow = (): void => {
-    renderer.render(scene, camera);
+  const angleFor = (state: GameState): number => (state.rotation * Math.PI) / 2;
+
+  /**
+   * Paints the two walls that will be facing the camera; painting is the
+   * costly part of a change. The other two are painted when the board is next
+   * turned towards them.
+   */
+  const paintWalls = (now: number): void => {
+    if (!shadows) return;
+    const target = angleFor(store.getState());
+    const depth = deepUntil !== 0 ? motionLook.solve.deepen : 1;
+    for (const wall of walls) {
+      if (wall.facing(target)) wall.paint(wall.shows === 'front' ? shadows.front : shadows.side, now, depth, shadowMs);
+    }
   };
 
-  const tick = (now: number): void => {
-    frame = 0;
+  /** Brings everything that moves up to the time `now`. Returns whether anything is still moving. */
+  const advance = (now: number): boolean => {
+    let moving = false;
     if (tween) {
       tween.startedAt ??= now;
       const t = Math.min((now - tween.startedAt) / ROTATE_MS, 1);
       const eased = 1 - (1 - t) ** 3;
       board.rotation.y = tween.from + (tween.to - tween.from) * eased;
-      if (t < 1) requestRender();
+      if (t < 1) moving = true;
       else tween = null;
     }
-    renderNow();
+    if (poseBlocks(now)) moving = true;
+    if (deepUntil !== 0) {
+      moving = true;
+      if (now >= deepUntil) {
+        // The moment has passed: the shadows ease back to their usual depth.
+        deepUntil = 0;
+        paintWalls(now);
+      }
+    }
+    for (const wall of walls) {
+      if (wall.step(now)) moving = true;
+    }
+    if (pulse.visible) {
+      const { low, high, periodMs } = motionLook.pulse;
+      const wave = reduced ? 1 : 0.5 + 0.5 * Math.sin((now / periodMs) * Math.PI * 2);
+      pulse.material.opacity = low + (high - low) * wave;
+      if (!reduced) moving = true;
+    }
+    return moving;
   };
 
-  // Draws once on the next frame. Only the rotation tween keeps asking.
+  const renderNow = (): void => {
+    advance(motionNow());
+    renderer.render(scene, camera);
+  };
+
+  const tick = (): void => {
+    frame = 0;
+    const moving = advance(motionNow());
+    renderer.render(scene, camera);
+    if (moving) requestRender();
+  };
+
+  // Draws once on the next frame. Only something still moving keeps asking.
   const requestRender = (): void => {
     if (frame === 0) frame = requestAnimationFrame(tick);
   };
 
-  const angleFor = (state: GameState): number => (state.rotation * Math.PI) / 2;
-
   const sync = (state: GameState): void => {
-    const standing = syncBlocks(state);
-    const front = diffShadow(projectFront(state.blocks, puzzle.size), frontTarget);
-    const side = diffShadow(projectSide(state.blocks, puzzle.size), sideTarget);
-    // Only the two walls that will be facing the camera are painted; painting
-    // is the costly part of a change. The other two are painted when the
-    // board is next turned towards them, which comes through here as well.
-    const target = angleFor(state);
-    for (const wall of walls) {
-      if (wall.facing(target)) wall.paint(wall.shows === 'front' ? front : side);
+    const now = motionNow();
+    const standing = syncBlocks(state, now);
+    shadows = {
+      front: diffShadow(projectFront(state.blocks, puzzle.size), frontTarget),
+      side: diffShadow(projectSide(state.blocks, puzzle.size), sideTarget),
+    };
+
+    // The moment a sculpture first becomes a valid solve: both shadows deepen
+    // briefly. Not for a sculpture found already solved, nor someone else's.
+    const solved = isSolved(state.blocks, puzzle);
+    if (solved && wasSolved === false && !state.viewing && !reduced) {
+      deepUntil = now + motionLook.solve.holdMs;
     }
+    wasSolved = solved;
+
+    paintWalls(now);
     paintFloor(standing);
 
+    const target = angleFor(state);
     if (target !== (tween ? tween.to : board.rotation.y)) {
       tween = { from: board.rotation.y, to: target, startedAt: null };
     }
@@ -537,6 +724,15 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     requestRender();
   };
 
+  const setPulse = (key: string | null): void => {
+    pulse.visible = key !== null;
+    if (key !== null) {
+      const { x, z } = parseKey(key);
+      pulse.position.copy(cellPosition(x, 0, z)).setY(0.008);
+    }
+    requestRender();
+  };
+
   const flashBlock = (key: string): void => {
     if (!blockViews.has(key) || flashing.has(key)) return;
     flashing.add(key);
@@ -560,10 +756,12 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     pick,
     isRotating: () => tween !== null,
     setGhost,
+    setPulse,
     flashBlock,
     renderNow,
     dispose: () => {
       unsubscribe();
+      for (const view of leavingViews.values()) discard(view);
       resizeObserver.disconnect();
       for (const timer of flashTimers) window.clearTimeout(timer);
       if (frame !== 0) cancelAnimationFrame(frame);
