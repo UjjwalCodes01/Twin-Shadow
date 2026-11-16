@@ -1,6 +1,7 @@
 // Puzzles made by players, as the game shows them: the help card that leads
 // to making one, the choice of board, the checklist while building, sending,
-// and for moderators the review of what has been sent.
+// and for moderators the review of what has been sent. None of it is needed
+// to draw the board, so it is loaded the first time one of these is wanted.
 //
 // A maker gives no name, title or other text: a puzzle is a sculpture, and
 // its only credit is the maker's username.
@@ -8,20 +9,18 @@
 import {
   parseMakePuzzleResponse,
   parseReviewResponse,
-  type CommunityStatus,
   type ReviewDecision,
   type ReviewPuzzle,
   type ReviewResponse,
 } from '../shared/api';
-import { COMMUNITY_BOARDS, type CommunityBoard } from '../shared/community';
-import { boardLabel, checklist, estimatePar } from './maker';
+import { COMMUNITY_BOARDS, PAR_REFUSALS, type CommunityBoard, type ParRefusal } from '../shared/community';
+import type { CommunityBar } from './communityBar';
+import { boardLabel, checklist, lastPuzzleText } from './maker';
 import { paintSilhouette } from './paint';
 import type { Store } from './store';
 
 const PUZZLES_URL = '/api/community/puzzles';
 const REVIEW_URL = '/api/community/review';
-/** The checklist waits this long after the last change before working out par, which takes a moment. */
-const PAR_DELAY_MS = 300;
 /** Longest side of a silhouette panel on the review card, in CSS px. */
 const REVIEW_PANEL_PX = 104;
 
@@ -34,10 +33,10 @@ export const sentText = (par: number): string =>
   `Sent for review. It takes ${par} blocks to solve. A moderator will look at it.`;
 export const SEND_FAILED = "Couldn't send it. Try again.";
 export const NOTHING_WAITING = 'Nothing is waiting for review.';
-export const reviewLabel = (waiting: number): string => `Review (${waiting})`;
-export const waitingText = (waiting: number): string =>
-  waiting === 1 ? '1 puzzle waiting' : `${waiting} puzzles waiting`;
-export const creditLine = (post: number, maker: string): string => `Puzzle #${post} by u/${maker}`;
+/** Where a moderator is in the line of waiting puzzles: "2 of 5". */
+export const positionText = (position: number, waiting: number): string => `${position} of ${waiting}`;
+/** Why a player with a puzzle waiting cannot send another: the server's own words for it. */
+const STILL_WAITING = 'Your last puzzle is still waiting for review.';
 
 export type CommunityActions = {
   /** Replays the warm-up. */
@@ -51,10 +50,6 @@ export type CommunityActions = {
 };
 
 export type CommunityUi = {
-  /** What the server says the caller may do: make a puzzle, review puzzles. */
-  setStatus: (status: CommunityStatus) => void;
-  /** Shows who made the puzzle on the board, or nothing for a generated one. */
-  setCredit: (post: number, maker: string | null) => void;
   openHelp: () => void;
   openMake: () => void;
   openReview: () => void;
@@ -80,23 +75,8 @@ const canvas = (id: string): HTMLCanvasElement => {
   return found;
 };
 
-export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
-  let status: CommunityStatus = { canMake: false, why: null, review: null };
-
-  // --- Banner: the maker's credit, and for a moderator the way to the review ---
-  const banner = element('banner');
-  const credit = element('banner-credit');
-  const reviewOpen = button('review-open');
-  const syncBanner = (): void => {
-    banner.hidden = credit.hidden && reviewOpen.hidden;
-  };
-  const showWaiting = (waiting: number | null): void => {
-    // Only a moderator has a number at all, and the button only shows when something waits.
-    reviewOpen.hidden = waiting === null || waiting === 0;
-    reviewOpen.textContent = waiting === null ? '' : reviewLabel(waiting);
-    syncBanner();
-  };
-
+/** `bar` holds what the caller may do, and shows a moderator how many puzzles wait. */
+export const createCommunityUi = (actions: CommunityActions, bar: CommunityBar): CommunityUi => {
   // --- Help: the warm-up again, or make a puzzle --------------------------------
   const helpLayer = element('help-layer');
   button('help-close').addEventListener('click', () => {
@@ -109,6 +89,7 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
 
   // --- Choosing a board ---------------------------------------------------------
   const makeLayer = element('make-layer');
+  const makeLast = element('make-last');
   const makeText = element('make-text');
   const makeBoards = element('make-boards');
   const boardButtons = [button('make-4'), button('make-5')];
@@ -125,9 +106,15 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
     makeLayer.hidden = true;
   });
   const openMake = (): void => {
+    const { canMake, why, last } = bar.getStatus();
+    // First, what became of the last puzzle they sent, if they have sent one.
+    makeLast.hidden = last === null;
+    makeLast.textContent = last === null ? '' : lastPuzzleText(last, canMake);
+    // A puzzle still waiting is the whole reason they cannot send another, so it is said once.
+    makeText.hidden = last?.status === 'waiting' && !canMake;
     // A player who may not make one yet is told why, in the server's words.
-    makeText.textContent = status.canMake ? MAKE_INTRO : (status.why ?? 'You cannot make a puzzle just now.');
-    makeBoards.hidden = !status.canMake;
+    makeText.textContent = canMake ? MAKE_INTRO : (why ?? 'You cannot make a puzzle just now.');
+    makeBoards.hidden = !canMake;
     makeLayer.hidden = false;
   };
   button('help-make').addEventListener('click', () => {
@@ -150,7 +137,16 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
     afterSend = null;
   });
 
-  const send = async (board: CommunityBoard, blocks: string[]): Promise<void> => {
+  /**
+   * Sends the sculpture. The server works the puzzle out and decides. When it
+   * is sent back because of how many blocks it takes to solve, `sentBack` is
+   * told which way, and the player goes on building.
+   */
+  const send = async (
+    board: CommunityBoard,
+    blocks: ReadonlySet<string>,
+    sentBack: (refusal: ParRefusal) => void
+  ): Promise<void> => {
     sendText.textContent = SENDING;
     sendConfirm.hidden = true;
     sendClose.disabled = true;
@@ -158,7 +154,7 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
       const response = await fetch(PUZZLES_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ size: board.size, blocks }),
+        body: JSON.stringify({ size: board.size, blocks: [...blocks] }),
       });
       const body: unknown = await response.json();
       const parsed = parseMakePuzzleResponse(body);
@@ -167,12 +163,14 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
         sendText.textContent = sentText(parsed.par);
         sendClose.textContent = 'Back to my board';
         // Their one waiting slot is now taken, until a moderator has looked.
-        status = { ...status, canMake: false, why: 'Your last puzzle is still waiting for review.' };
+        bar.setStatus({ ...bar.getStatus(), canMake: false, why: STILL_WAITING, last: { status: 'waiting' } });
         afterSend = actions.stopMaking;
       } else {
-        // The server's own sentence says which rule stopped it.
+        // The server's own sentence says which rule stopped it, and for par which way to go.
         sendText.textContent = parsed.message;
         sendClose.textContent = 'Keep building';
+        const refusal = PAR_REFUSALS.find((known) => known === parsed.reason);
+        if (refusal) sentBack(refusal);
       }
     } catch (error) {
       console.error(`Could not send the puzzle to ${PUZZLES_URL}:`, error);
@@ -194,36 +192,26 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
   makerSend.addEventListener('click', () => askToSend?.());
 
   const runMaker = (store: Store, board: CommunityBoard): (() => void) => {
-    /** The estimate of par for the sculpture it was worked out for; out of date as soon as that changes. */
-    let par: { for: ReadonlySet<string>; value: number | null } | null = null;
-    let timer = 0;
+    /** The sculpture the server sent back over par, and which way: said in the note until it changes. */
+    let sentBack: { blocks: ReadonlySet<string>; refusal: ParRefusal } | null = null;
 
     const render = (): void => {
       const { blocks } = store.getState();
-      const known = par && par.for === blocks ? par.value : null;
-      const list = checklist(blocks, board, known);
-      makerList.replaceChildren(
-        ...list.lines.map((line) => {
-          const item = document.createElement('li');
-          item.textContent = line.text;
-          // Met, not yet met, or still being worked out: said in words for a screen reader too.
-          item.className = line.met === true ? 'met' : line.met === null ? 'working' : '';
-          item.setAttribute('aria-label', `${line.text}: ${line.met === true ? 'done' : line.met === null ? 'checking' : 'not yet'}`);
-          return item;
-        })
-      );
+      const list = checklist(blocks, board, sentBack && sentBack.blocks === blocks ? sentBack.refusal : null);
+      const rules = list.lines.map((line) => {
+        const item = document.createElement('li');
+        item.textContent = line.text;
+        // Met or not yet met: said in words for a screen reader too.
+        item.className = line.met ? 'met' : '';
+        item.setAttribute('aria-label', `${line.text}: ${line.met ? 'done' : 'not yet'}`);
+        return item;
+      });
+      // Not a rule to tick: how many blocks it takes to solve is only settled when the puzzle is sent.
+      const note = document.createElement('li');
+      note.className = 'note';
+      note.textContent = list.note;
+      makerList.replaceChildren(...rules, note);
       makerSend.disabled = !list.ready;
-    };
-
-    const update = (): void => {
-      render();
-      // Par takes a moment to work out, so it waits until the player pauses.
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const { blocks } = store.getState();
-        par = { for: blocks, value: estimatePar(blocks, board) };
-        render();
-      }, PAR_DELAY_MS);
     };
 
     leaveMaker = actions.stopMaking;
@@ -232,15 +220,20 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
       sendConfirm.hidden = false;
       sendClose.textContent = 'Keep building';
       afterSend = null;
-      confirmSend = () => void send(board, [...store.getState().blocks]);
+      confirmSend = () => {
+        const { blocks } = store.getState();
+        void send(board, blocks, (refusal) => {
+          sentBack = { blocks, refusal };
+          render();
+        });
+      };
       sendLayer.hidden = false;
     };
     makerPanel.hidden = false;
-    const unsubscribe = store.subscribe(update);
-    update();
+    const unsubscribe = store.subscribe(render);
+    render();
     return () => {
       unsubscribe();
-      window.clearTimeout(timer);
       leaveMaker = null;
       askToSend = null;
       confirmSend = null;
@@ -258,8 +251,13 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
   const reviewMaker = element('review-maker');
   const reviewDecide = element('review-decide');
   const reviewTry = button('review-try');
+  const reviewPrev = button('review-prev');
+  const reviewNext = button('review-next');
   const decideButtons = [button('review-approve'), button('review-reject')];
+  const stepButtons = [reviewPrev, reviewNext];
   let shown: ReviewPuzzle | null = null;
+  /** The place in the line the moderator is looking at, from 1: kept while they try a puzzle on the board. */
+  let at = 1;
 
   const showReview = (reply: ReviewResponse | null): void => {
     for (const decide of decideButtons) decide.disabled = false;
@@ -272,21 +270,25 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
       reviewTry.hidden = true;
       return;
     }
-    showWaiting(reply.waiting);
+    bar.showWaiting(reply.waiting);
     shown = reply.puzzle;
+    at = Math.max(reply.position, 1);
     reviewStatus.hidden = shown !== null;
     reviewStatus.textContent = NOTHING_WAITING;
     reviewBody.hidden = shown === null;
     reviewDecide.hidden = shown === null;
     reviewTry.hidden = shown === null;
     if (!shown) return;
-    reviewWaiting.textContent = waitingText(reply.waiting);
+    reviewWaiting.textContent = positionText(reply.position, reply.waiting);
+    reviewPrev.disabled = reply.position <= 1;
+    reviewNext.disabled = reply.position >= reply.waiting;
     paintSilhouette(canvas('review-front'), 'front', shown.front, false, REVIEW_PANEL_PX);
     paintSilhouette(canvas('review-side'), 'side', shown.side, false, REVIEW_PANEL_PX);
     reviewSize.textContent = `${boardLabel(shown.size)} · par ${shown.par}`;
     reviewMaker.textContent = `by u/${shown.maker}`;
   };
 
+  /** Asks for the puzzle at the place being looked at, deciding the one shown first when a decision is given. */
   const askReview = async (decision?: ReviewDecision): Promise<void> => {
     try {
       const response =
@@ -294,9 +296,9 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
           ? await fetch(REVIEW_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: shown.id, decision }),
+              body: JSON.stringify({ id: shown.id, decision, at }),
             })
-          : await fetch(REVIEW_URL);
+          : await fetch(`${REVIEW_URL}?at=${at}`);
       const body: unknown = await response.json();
       const parsed = parseReviewResponse(body);
       if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
@@ -316,11 +318,18 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
     reviewLayer.hidden = false;
     void askReview();
   };
-  reviewOpen.addEventListener('click', openReview);
   decideButtons.forEach((decide, index) => {
     decide.addEventListener('click', () => {
       for (const other of decideButtons) other.disabled = true;
       void askReview(index === 0 ? 'approve' : 'reject');
+    });
+  });
+  // Back and on along the line. The puzzle shown stays until the next one arrives.
+  stepButtons.forEach((step, index) => {
+    step.addEventListener('click', () => {
+      for (const other of stepButtons) other.disabled = true;
+      at = Math.max(at + (index === 0 ? -1 : 1), 1);
+      void askReview();
     });
   });
   reviewTry.addEventListener('click', () => {
@@ -333,15 +342,6 @@ export const createCommunityUi = (actions: CommunityActions): CommunityUi => {
   });
 
   return {
-    setStatus: (next) => {
-      status = next;
-      showWaiting(next.review);
-    },
-    setCredit: (post, maker) => {
-      credit.hidden = maker === null;
-      credit.textContent = maker === null ? '' : creditLine(post, maker);
-      syncBanner();
-    },
     openHelp: () => {
       helpLayer.hidden = false;
     },

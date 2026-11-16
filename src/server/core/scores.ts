@@ -171,7 +171,8 @@ const ensureCounted = async (stored: StoredSubmission): Promise<void> => {
  * number of requests from one player for one post, exactly one is 'accepted'
  * by storeSubmission. Only that one touches the streak, and countSolve claims
  * each of its steps, so the leaderboard, the counts and the streak each
- * change once per player per post.
+ * change once per player per post. The maker of the post's puzzle gets
+ * 'own-puzzle' and nothing is stored or counted.
  */
 export const acceptSubmission = async (
   postId: string,

@@ -4,11 +4,13 @@ import {
   castShadows,
   CHECK_REFUSAL,
   CHECK_TEXT,
-  CHECKS,
   COMMUNITY_BOARDS,
   firstShapeFailure,
   parInRange,
+  parRefusal,
+  parRefusalText,
   puzzleKey,
+  SHAPE_CHECKS,
   shapeChecks,
   workOutPar,
   type CommunityBoard,
@@ -42,7 +44,7 @@ describe('the boards', () => {
 
 describe('the wording', () => {
   it('has a checklist line and a refusal for every check', () => {
-    for (const check of CHECKS) {
+    for (const check of SHAPE_CHECKS) {
       expect(CHECK_TEXT[check]).toMatch(/\S/);
       expect(CHECK_REFUSAL[check]).toMatch(/\S/);
     }
@@ -144,6 +146,19 @@ describe('workOutPar and parInRange', () => {
     expect(parInRange(FOUR.maxPar + 1, FOUR)).toBe(false);
     // The good sculpture's par is in range for its board.
     expect(parInRange(workOutPar(GOOD, FOUR.size).par, FOUR)).toBe(true);
+  });
+
+  it('par: says which way it is out, in words a maker can act on', () => {
+    expect(parRefusal(FOUR.minPar - 1, FOUR)).toBe('par-low');
+    expect(parRefusal(FOUR.minPar, FOUR)).toBeNull();
+    expect(parRefusal(FOUR.maxPar, FOUR)).toBeNull();
+    expect(parRefusal(FOUR.maxPar + 1, FOUR)).toBe('par-high');
+    expect(parRefusalText('par-low', 5, FOUR)).toBe(
+      'It needs more blocks to solve. It can be solved with 5, and a puzzle on this board must take at least 6. Make the shadows bigger and send it again.'
+    );
+    expect(parRefusalText('par-high', 13, FOUR)).toBe(
+      'It needs fewer blocks to solve. It takes 13, and a puzzle on this board may take at most 10. Make the shadows smaller and send it again.'
+    );
   });
 });
 

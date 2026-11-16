@@ -25,6 +25,13 @@
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
+      },
+      {
+        "label": "Create a community puzzle post now",
+        "description": "Twin Shadows: test subreddit only",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/community-post"
       }
     ]
   },

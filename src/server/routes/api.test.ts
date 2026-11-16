@@ -390,3 +390,41 @@ describe('isDevSubreddit', () => {
     expect(isDevSubreddit(undefined)).toBe(false);
   });
 });
+
+describe('POST /api/sound', () => {
+  const report = (body: unknown): Promise<Response> =>
+    Promise.resolve(
+      api.request('/sound', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    );
+
+  it('writes one log line saying whose session it was and whether sound was running, and stores nothing', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { postId } = await openNewPost(ALICE);
+    log.mockClear();
+    const stored = JSON.stringify([devvit.hashContents(KEYS.prefs), devvit.hashContents(KEYS.onboarding), submissionsStored(postId)]);
+    expect((await report({ state: 'running' })).status).toBe(200);
+    expect(log.mock.calls).toEqual([['Sound: first sound of a session for alice (audio running)']]);
+    expect(JSON.stringify([devvit.hashContents(KEYS.prefs), devvit.hashContents(KEYS.onboarding), submissionsStored(postId)])).toBe(stored);
+    log.mockRestore();
+  });
+
+  it('logs a logged-out visitor without a name', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await openNewPost(undefined);
+    log.mockClear();
+    expect((await report({ state: 'suspended' })).status).toBe(200);
+    expect(log.mock.calls).toEqual([['Sound: first sound of a session for a logged-out visitor (audio suspended)']]);
+    log.mockRestore();
+  });
+
+  it('refuses, and logs nothing, for a body that is not one short plain word', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await openNewPost(ALICE);
+    log.mockClear();
+    for (const body of [{ state: 'running\nPost creation refused' }, { state: 'x'.repeat(200) }, { state: 7 }, {}, null]) {
+      expect((await report(body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+});

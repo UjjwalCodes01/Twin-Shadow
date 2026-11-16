@@ -3,7 +3,7 @@
 // board. The server only sends it to a player who has already submitted.
 
 import type { Gallery, GalleryEntry, GallerySort } from '../shared/api';
-import { blockText } from './result';
+import { blockText } from './count';
 import type { Store } from './store';
 
 // --- Wording (no DOM, so it can be tested) ---------------------------------------

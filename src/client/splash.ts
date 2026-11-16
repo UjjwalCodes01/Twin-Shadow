@@ -9,7 +9,7 @@ import {
   buttonText,
   CREATOR_CREDIT,
   DESCRIPTION,
-  headingText,
+  headingLines,
   playedText,
   solversText,
   streakText,
@@ -65,7 +65,20 @@ const paintPanel = (id: string, kind: WallKind, rows: readonly string[], solved:
 
 const show = (splash: SplashResponse): void => {
   const { played, streak, solvers } = splash;
-  element('splash-heading').textContent = headingText(splash);
+  // One row per line of the heading, and each phrase in a piece that never breaks in the middle.
+  element('splash-heading').replaceChildren(
+    ...headingLines(splash).map((phrases) => {
+      const line = document.createElement('span');
+      line.className = 'splash-line';
+      phrases.forEach((phrase, index) => {
+        const piece = document.createElement('span');
+        piece.className = 'splash-phrase';
+        piece.textContent = phrase;
+        line.append(index === 0 ? '' : ' ', piece);
+      });
+      return line;
+    })
+  );
 
   paintPanel('splash-front', 'front', splash.front, played !== null);
   paintPanel('splash-side', 'side', splash.side, played !== null);

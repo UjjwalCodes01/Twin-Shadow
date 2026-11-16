@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSounds, soundForChange, type BoardMoment } from './sound';
 
 const board = (blocks: number, changes: Partial<BoardMoment> = {}): BoardMoment => ({
@@ -52,5 +52,91 @@ describe('createSounds', () => {
     sounds.setMuted(true);
     expect(sounds.isMuted()).toBe(true);
     expect(() => sounds.knock()).not.toThrow();
+  });
+});
+
+describe('the first sound of a session', () => {
+  // Just enough of the browser's sound set-up for a sound to be scheduled.
+  const param = () => ({ value: 0, setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} });
+  const node = () => ({
+    connect: (next: unknown) => next,
+    start: () => {},
+    stop: () => {},
+    gain: param(),
+    frequency: param(),
+    type: '',
+    buffer: null,
+  });
+  let state = 'running';
+  class FakeAudioContext {
+    currentTime = 0;
+    sampleRate = 8000;
+    destination = {};
+    get state(): string {
+      return state;
+    }
+    createGain = node;
+    createOscillator = node;
+    createBufferSource = node;
+    createBiquadFilter = node;
+    createBuffer = (_channels: number, length: number) => ({ getChannelData: () => new Float32Array(length) });
+    resume = async (): Promise<void> => {};
+  }
+
+  beforeEach(() => {
+    state = 'running';
+    vi.useFakeTimers();
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('is reported once, a moment after it is played, with what the device says of its sound', () => {
+    const reports: string[] = [];
+    const sounds = createSounds((said) => reports.push(said));
+    sounds.unlock();
+    sounds.knock();
+    // Not at once: a set-up that is still waking gets a moment to say so.
+    expect(reports).toEqual([]);
+    vi.advanceTimersByTime(300);
+    expect(reports).toEqual(['running']);
+    sounds.lift();
+    sounds.solved();
+    sounds.knock(85);
+    vi.advanceTimersByTime(5000);
+    expect(reports).toEqual(['running']);
+  });
+
+  it('says so when the device has not let sound start', () => {
+    const reports: string[] = [];
+    const sounds = createSounds((said) => reports.push(said));
+    state = 'suspended';
+    sounds.unlock();
+    sounds.lift();
+    vi.advanceTimersByTime(300);
+    expect(reports).toEqual(['suspended']);
+  });
+
+  it('is not reported before the player has tapped, or while sound is off', () => {
+    const reports: string[] = [];
+    const sounds = createSounds((said) => reports.push(said));
+    sounds.knock();
+    vi.advanceTimersByTime(1000);
+    expect(reports).toEqual([]);
+    sounds.setMuted(true);
+    sounds.unlock();
+    sounds.knock();
+    sounds.solved();
+    vi.advanceTimersByTime(1000);
+    expect(reports).toEqual([]);
+    // Turned back on: the next sound is the first one heard.
+    sounds.setMuted(false);
+    sounds.lift();
+    vi.advanceTimersByTime(300);
+    expect(reports).toEqual(['running']);
   });
 });

@@ -25,6 +25,7 @@ vi.mock('@devvit/web/server', () => devvit);
 const { api } = await import('./api');
 const { community } = await import('./community');
 const { createDailyPost, createNextPost, creditText, loadPost } = await import('../core/posts');
+const { menu } = await import('./menu');
 const { WEEKLY_LIMIT } = await import('../core/community');
 
 const FOUR: Size = { w: 4, d: 4, h: 4 };
@@ -114,9 +115,9 @@ const send = async (name: string | undefined, blocks: readonly string[], size: S
 const reasonOf = (sent: { parsed: MakePuzzleResponse | null }): string | null =>
   sent.parsed?.status === 'refused' ? sent.parsed.reason : null;
 
-const review = async (name: string | undefined, body?: unknown) => {
+const review = async (name: string | undefined, body?: unknown, at?: number) => {
   as(home, name);
-  const response = await community.request('/review', {
+  const response = await community.request(at === undefined ? '/review' : `/review?at=${at}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -222,10 +223,16 @@ describe('who may make a puzzle', () => {
     expect((await puzzleFor(home, 'ann')).parsed.community).toEqual({
       canMake: false,
       why: 'Solve a daily puzzle first. Then you can make one.',
+      last: null,
       review: null,
     });
     await eligible('ann');
-    expect((await puzzleFor(home, 'ann')).parsed.community).toEqual({ canMake: true, why: null, review: null });
+    expect((await puzzleFor(home, 'ann')).parsed.community).toEqual({
+      canMake: true,
+      why: null,
+      last: null,
+      review: null,
+    });
     await send('ann', A);
     expect((await puzzleFor(home, 'ann')).parsed.community.why).toBe('Your last puzzle is still waiting for review.');
     expect((await puzzleFor(home, undefined)).parsed.community.canMake).toBe(false);
@@ -264,13 +271,34 @@ describe('the rules, checked again on the server', () => {
 
   it('refuses a puzzle that takes too few blocks to solve', async () => {
     // Five blocks solve it: three on the floor and a tower of two.
-    expect(await refusal(['0,0,0', '0,0,1', '0,0,2', '1,0,2', '2,0,2', '0,1,2', '0,2,2'])).toBe('par');
+    const slight = ['0,0,0', '0,0,1', '0,0,2', '1,0,2', '2,0,2', '0,1,2', '0,2,2'];
+    expect(await refusal(slight)).toBe('par-low');
+    // Said plainly: it needs more, how many it takes now, and how many it must take.
+    const { parsed } = await send('ann', slight);
+    expect(parsed?.status === 'refused' && parsed.message).toBe(
+      'It needs more blocks to solve. It can be solved with 5, and a puzzle on this board must take at least 6. Make the shadows bigger and send it again.'
+    );
   });
 
   it('refuses a puzzle that takes too many blocks to solve', async () => {
     // A wall four, four, three and two high: at least thirteen blocks.
     const wall = [4, 4, 3, 2].flatMap((height, x) => Array.from({ length: height }, (_, y) => `${x},${y},0`));
-    expect(await refusal([...wall, '0,0,1', '0,0,2', '0,0,3'])).toBe('par');
+    const heavy = [...wall, '0,0,1', '0,0,2', '0,0,3'];
+    expect(await refusal(heavy)).toBe('par-high');
+    const { parsed } = await send('ann', heavy);
+    expect(parsed?.status === 'refused' && parsed.message).toMatch(
+      /^It needs fewer blocks to solve\. It takes \d+, and a puzzle on this board may take at most 10\. Make the shadows smaller and send it again\.$/
+    );
+  });
+
+  it('leaves a maker who was refused over par free to keep building and send again', async () => {
+    await eligible('ann');
+    expect(reasonOf(await send('ann', ['0,0,0', '0,0,1', '0,0,2', '1,0,2', '2,0,2', '0,1,2', '0,2,2']))).toBe('par-low');
+    // Nothing was kept: no waiting slot, no send counted against the week, no status.
+    expect(devvit.hashContents(KEYS.communityPendingByMaker)).toEqual({});
+    expect(devvit.hashContents(KEYS.communitySent)).toEqual({});
+    expect((await puzzleFor(home, 'ann')).parsed.community).toEqual({ canMake: true, why: null, last: null, review: null });
+    expect((await send('ann', A)).parsed?.status).toBe('sent');
   });
 
   it('refuses a board that is not on offer, and blocks outside the board', async () => {
@@ -304,6 +332,7 @@ describe('the rules, checked again on the server', () => {
     expect(parsed).toEqual({
       status: 'ok',
       waiting: 1,
+      position: 1,
       puzzle: { id: 'cp-0001', size: FOUR, front: shadows.frontRows, side: shadows.sideRows, par: 7, maker: 'ann' },
     });
   });
@@ -401,6 +430,77 @@ describe('review', () => {
     expect(devvit.hashContents(KEYS.communityApproved)).toEqual({});
     expect(devvit.hashContents(KEYS.communityPendingByMaker)).toEqual({ t2_bea: 'cp-0002' });
     expect((await send('ann', E)).parsed?.status).toBe('sent');
+  });
+
+  describe('along the line', () => {
+    const shownAt = async (at?: number, body?: unknown) => {
+      const { parsed } = await review('mod', body, at);
+      if (parsed?.status !== 'ok') throw new Error('The review was refused');
+      return { waiting: parsed.waiting, position: parsed.position, id: parsed.puzzle?.id ?? null };
+    };
+
+    beforeEach(async () => {
+      // A third and a fourth puzzle behind ann's and bea's.
+      await eligible('cal', 'dee');
+      vi.setSystemTime(date('2026-12-03'));
+      await send('cal', E);
+      vi.setSystemTime(date('2026-12-04'));
+      await send('dee', LOW);
+    });
+
+    it('shows any puzzle in the line by its place, oldest first, with "2 of 4" to say where', async () => {
+      expect(await shownAt()).toEqual({ waiting: 4, position: 1, id: 'cp-0001' });
+      expect(await shownAt(1)).toEqual({ waiting: 4, position: 1, id: 'cp-0001' });
+      expect(await shownAt(2)).toEqual({ waiting: 4, position: 2, id: 'cp-0002' });
+      expect(await shownAt(3)).toEqual({ waiting: 4, position: 3, id: 'cp-0003' });
+      expect(await shownAt(4)).toEqual({ waiting: 4, position: 4, id: 'cp-0004' });
+    });
+
+    it('gives the nearest end for a place that is not in the line', async () => {
+      expect(await shownAt(9)).toEqual({ waiting: 4, position: 4, id: 'cp-0004' });
+      expect(await shownAt(0)).toEqual({ waiting: 4, position: 1, id: 'cp-0001' });
+      expect(await shownAt(-3)).toEqual({ waiting: 4, position: 1, id: 'cp-0001' });
+      as(home, 'mod');
+      const odd = parseReviewResponse(await (await community.request('/review?at=soon')).json());
+      expect(odd?.status === 'ok' && odd.position).toBe(1);
+    });
+
+    it('skipping decides nothing: every puzzle is still waiting, in the same order', async () => {
+      for (const at of [2, 3, 4, 3, 2, 1]) await shownAt(at);
+      expect(devvit.sortedSetMembers(KEYS.communityPendingOrder)).toEqual(['cp-0001', 'cp-0002', 'cp-0003', 'cp-0004']);
+      expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual([]);
+    });
+
+    it('after a decision shows the puzzle now standing in the same place', async () => {
+      // Looking at the second of four and approving it: the third moves up into its place.
+      expect(await shownAt(undefined, { id: 'cp-0002', decision: 'approve', at: 2 })).toEqual({
+        waiting: 3,
+        position: 2,
+        id: 'cp-0003',
+      });
+      // Rejecting the last in the line leaves the moderator on the new last.
+      expect(await shownAt(undefined, { id: 'cp-0004', decision: 'reject', at: 3 })).toEqual({
+        waiting: 2,
+        position: 2,
+        id: 'cp-0003',
+      });
+      expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual(['cp-0002']);
+    });
+
+    it('says nothing is waiting once the line is empty', async () => {
+      for (const id of ['cp-0001', 'cp-0002', 'cp-0003']) await review('mod', { id, decision: 'reject', at: 1 });
+      expect(await shownAt(undefined, { id: 'cp-0004', decision: 'approve', at: 1 })).toEqual({
+        waiting: 0,
+        position: 0,
+        id: null,
+      });
+      expect(await shownAt(3)).toEqual({ waiting: 0, position: 0, id: null });
+    });
+
+    it('is closed to anyone who is not a moderator, whatever place they ask for', async () => {
+      expect((await review('ann', undefined, 2)).status).toBe(403);
+      expect((await review(undefined, undefined, 2)).status).toBe(403);
+    });
   });
 
   it('queues approved puzzles in the order they were approved, not the order they were sent', async () => {
@@ -522,6 +622,185 @@ describe('the Sunday post', () => {
   });
 });
 
+describe('what a maker is told about their last puzzle', () => {
+  const lastOf = async (name: string) => (await puzzleFor(home, name)).parsed.community.last;
+
+  beforeEach(async () => {
+    await eligible('ann', 'bea');
+  });
+
+  it('is nothing for a player who has sent none', async () => {
+    expect(await lastOf('ann')).toBeNull();
+    expect(devvit.hashContents(KEYS.communityLast)).toEqual({});
+  });
+
+  it('is waiting once sent, and only for the one who sent it', async () => {
+    await send('ann', A);
+    expect(await lastOf('ann')).toEqual({ status: 'waiting' });
+    expect(await lastOf('bea')).toBeNull();
+    expect(await lastOf('mod')).toBeNull();
+  });
+
+  it('is approved once a moderator approves it, and they may make another', async () => {
+    await send('ann', A);
+    await decide('approve');
+    expect((await puzzleFor(home, 'ann')).parsed.community).toEqual({
+      canMake: true,
+      why: null,
+      last: { status: 'approved' },
+      review: null,
+    });
+  });
+
+  it('is used, with the date, once it has been the puzzle of a daily post', async () => {
+    await send('ann', A);
+    await decide('approve');
+    await dailyPost(SUNDAY);
+    expect(await lastOf('ann')).toEqual({ status: 'used', date: SUNDAY });
+  });
+
+  it('is "not picked" after a rejection, with no reason anywhere, and they may make another', async () => {
+    await send('ann', A);
+    await decide('reject');
+    const { parsed, text } = await puzzleFor(home, 'ann');
+    expect(parsed.community).toEqual({ canMake: true, why: null, last: { status: 'rejected' }, review: null });
+    expect(text).not.toMatch(/reason|because/i);
+    // What is stored is the puzzle's id and its status, and nothing else.
+    expect(devvit.hashContents(KEYS.communityLast)).toEqual({ t2_ann: '{"id":"cp-0001","status":"rejected"}' });
+  });
+
+  it('follows the newest puzzle: news of an older one does not replace it', async () => {
+    await send('ann', A);
+    await decide('approve');
+    vi.setSystemTime(date('2026-12-02'));
+    await send('ann', C);
+    expect(await lastOf('ann')).toEqual({ status: 'waiting' });
+    // The first one is used on Sunday while the second still waits.
+    await dailyPost(SUNDAY);
+    expect((await loadPost(latestPost().id))?.puzzle.id).toBe('cp-0001');
+    expect(await lastOf('ann')).toEqual({ status: 'waiting' });
+    await decide('reject');
+    expect(await lastOf('ann')).toEqual({ status: 'rejected' });
+  });
+
+  it('counts a puzzle sent before this was kept as waiting', async () => {
+    await send('ann', A);
+    await devvit.redis.hDel(KEYS.communityLast, ['t2_ann']);
+    expect(await lastOf('ann')).toEqual({ status: 'waiting' });
+  });
+
+  it('tells a logged-out visitor nothing', async () => {
+    await send('ann', A);
+    expect((await puzzleFor(home, undefined)).parsed.community.last).toBeNull();
+  });
+});
+
+describe('the test menu item that makes a community post now', () => {
+  const press = async (name: string | undefined, subreddit = 'twin_shadowss_dev') => {
+    as(home, name);
+    devvit.context.subredditName = subreddit;
+    const response = await menu.request('/community-post', { method: 'POST' });
+    const body: unknown = await response.json();
+    devvit.context.subredditName = 'some_game';
+    return { status: response.status, text: JSON.stringify(body) };
+  };
+
+  beforeEach(async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await eligible('ann', 'bea', 'cal');
+    await send('ann', A);
+    await decide('approve');
+    vi.setSystemTime(date('2026-12-02'));
+    await send('bea', C);
+    await decide('approve');
+    // A Wednesday: nothing about the day makes this a community post.
+    vi.setSystemTime(date('2026-12-02', 9));
+  });
+
+  it('makes a post from the oldest approved puzzle, exactly as Sunday would: the credit and the pinned comment', async () => {
+    const before = devvit.posts.length;
+    const pressed = await press('mod');
+    expect(pressed.status).toBe(200);
+    expect(devvit.posts.length).toBe(before + 1);
+    const post = latestPost();
+    expect(pressed.text).toContain(post.id);
+    expect(post.title).toMatch(/^Twin Shadows #\d+$/);
+    const record = await loadPost(post.id);
+    expect(record?.puzzle.id).toBe('cp-0001');
+    expect(record?.maker).toEqual({ userId: 't2_ann', username: 'ann' });
+    expect(devvit.comments.at(-1)).toMatchObject({ postId: post.id, text: creditText('ann'), authorName: 'the-app', pinned: true });
+    // The next approved puzzle is still in the queue, and the maker is told theirs was used.
+    expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual(['cp-0002']);
+    expect((await puzzleFor(home, 'ann')).parsed.community.last).toEqual({ status: 'used', date: '2026-12-02' });
+    // In the game and on the splash it carries the credit like any community post.
+    expect((await puzzleFor(post, 'cal')).parsed.maker).toBe('ann');
+    expect(parseSplashResponse((await get(post, 'cal', '/splash')).body)?.maker).toBe('ann');
+  });
+
+  it('is an extra post: not the day`s daily post, and nothing towards a streak', async () => {
+    const dailyBefore = devvit.stringValue(KEYS.dailyCounter);
+    const datesBefore = { ...devvit.hashContents(KEYS.postDates) };
+    await press('mod');
+    const post = latestPost();
+    const record = await loadPost(post.id);
+    expect(record?.kind).toBe('manual');
+    expect(record?.daily).toBeNull();
+    expect(devvit.stringValue(KEYS.dailyCounter)).toBe(dailyBefore);
+    expect(devvit.hashContents(KEYS.postDates)).toEqual(datesBefore);
+    expect(devvit.hashContents(KEYS.dailyMakers)).toEqual({});
+    // Solving it leaves a streak exactly where it was.
+    const streakOf = async (): Promise<number | null> =>
+      parseSplashResponse((await get(post, 'cal', '/splash')).body)?.streak ?? null;
+    const streakBefore = await streakOf();
+    expect((await submit(post, 'cal', A)).parsed?.status).toBe('accepted');
+    expect(await streakOf()).toBe(streakBefore);
+    // The day's real daily post is still to come, and is made as usual from the generated queue.
+    expect(await createDailyPost(date('2026-12-02', 9))).toBe('created');
+    const daily = await loadPost(latestPost().id);
+    expect(daily?.kind).toBe('daily');
+    expect(daily?.maker).toBeNull();
+    expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual(['cp-0002']);
+  });
+
+  it('never ranks the maker on it either', async () => {
+    await press('mod');
+    const post = latestPost();
+    expect((await puzzleFor(post, 'ann')).parsed.yours).toBe(true);
+    expect((await submit(post, 'ann', A)).status).toBe(403);
+    expect(devvit.hashContents(KEYS.submissions(post.id))).toEqual({});
+  });
+
+  it('says so and does nothing when no community puzzle is approved', async () => {
+    await press('mod');
+    await press('mod');
+    const before = devvit.posts.length;
+    const counter = devvit.stringValue(KEYS.postCounter);
+    const pressed = await press('mod');
+    expect(pressed.status).toBe(200);
+    expect(pressed.text).toContain('No approved community puzzle is waiting');
+    expect(devvit.posts.length).toBe(before);
+    expect(devvit.stringValue(KEYS.postCounter)).toBe(counter);
+  });
+
+  it('does nothing outside a subreddit whose name ends in _dev, even for a moderator', async () => {
+    const before = devvit.posts.length;
+    for (const subreddit of ['twin_shadowss', 'twinshadows', 'dev_twin_shadows', 'twin_shadowss_devs']) {
+      const pressed = await press('mod', subreddit);
+      expect(pressed.status, subreddit).toBe(403);
+      expect(pressed.text).toContain('only for the test subreddit');
+    }
+    expect(devvit.posts.length).toBe(before);
+    expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual(['cp-0001', 'cp-0002']);
+  });
+
+  it('is for moderators only', async () => {
+    const before = devvit.posts.length;
+    for (const name of ['ann', 'cal', undefined]) expect((await press(name)).status).toBe(403);
+    expect(devvit.posts.length).toBe(before);
+    expect(devvit.sortedSetMembers(KEYS.communityApprovedOrder)).toEqual(['cp-0001', 'cp-0002']);
+  });
+});
+
 describe('the maker on their own puzzle', () => {
   let sunday: FakePost;
 
@@ -549,6 +828,66 @@ describe('the maker on their own puzzle', () => {
     });
     expect(devvit.sortedSetMembers(KEYS.leaderboard(sunday.id))).toEqual(['t2_bea']);
     expect(Object.keys(devvit.hashContents(KEYS.submissions(sunday.id)))).toEqual(['t2_bea']);
+  });
+
+  it('is recorded nowhere, whichever way they try to submit', async () => {
+    const { storeSubmission } = await import('../core/submissions');
+    const { acceptSubmission } = await import('../core/scores');
+    const record = await loadPost(sunday.id);
+    if (!record) throw new Error('The post has no record');
+    const ann = { userId: 't2_ann', username: 'ann' };
+    const streakBefore = devvit.hashContents(KEYS.streaks).t2_ann;
+    const perPost = [KEYS.submissions, KEYS.blockCounts, KEYS.sculptures, KEYS.gallery, KEYS.counted, KEYS.shares];
+    const post = (path: string) => {
+      as(sunday, 'ann');
+      return api.request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    };
+
+    const tryEverything = async (): Promise<void> => {
+      // The submit route: the sculpture the puzzle was made from, another valid solve, and two requests at once.
+      for (const blocks of [A, [...A, '1,0,0']]) expect((await submit(sunday, 'ann', blocks)).status).toBe(403);
+      const atOnce = await Promise.all([submit(sunday, 'ann', A), submit(sunday, 'ann', A)]);
+      expect(atOnce.map((reply) => reply.status)).toEqual([403, 403]);
+      // The two functions under the route, called directly. A changed name is no way round: a maker is known by id.
+      expect((await acceptSubmission(sunday.id, record, ann, A, Date.now())).status).toBe('own-puzzle');
+      expect((await acceptSubmission(sunday.id, record, { ...ann, username: 'someone-else' }, A, Date.now())).status).toBe('own-puzzle');
+      expect((await storeSubmission(sunday.id, record, ann, A, Date.now())).status).toBe('own-puzzle');
+      // Every route that reads a result, the gallery or the splash, and the one that shares a result.
+      for (const path of ['/puzzle', '/splash', '/result', '/gallery', '/gallery?sort=leanest&page=2']) {
+        await get(sunday, 'ann', path);
+      }
+      expect((await post('/share')).status).toBe(403);
+    };
+
+    await tryEverything();
+    // Nothing at all is kept for the post, and the maker's streak is as it was.
+    for (const key of perPost) expect(devvit.hashContents(key(sunday.id)), key(sunday.id)).toEqual({});
+    expect(devvit.sortedSetMembers(KEYS.leaderboard(sunday.id))).toEqual([]);
+    expect(devvit.hashContents(KEYS.streaks).t2_ann).toBe(streakBefore);
+    expect((await puzzleFor(sunday, 'ann')).parsed.submission).toBeNull();
+
+    // Two players solve it, one with the very sculpture the maker built. The maker tries it all again.
+    await submit(sunday, 'bea', A);
+    await submit(sunday, 'cal', [...A, '1,0,0']);
+    await tryEverything();
+    expect(devvit.sortedSetMembers(KEYS.leaderboard(sunday.id))).toEqual(['t2_bea', 't2_cal']);
+    expect(Object.keys(devvit.hashContents(KEYS.submissions(sunday.id)))).toEqual(['t2_bea', 't2_cal']);
+    expect(devvit.hashContents(KEYS.blockCounts(sunday.id))).toEqual({ '11': '1', '12': '1' });
+    // One builder for each sculpture: the maker is not counted as a second builder of their own.
+    expect(Object.values(devvit.hashContents(KEYS.sculptures(sunday.id)))).toEqual(['1', '1']);
+    expect(Object.values(devvit.hashContents(KEYS.gallery(sunday.id))).join('')).not.toContain('ann');
+    expect(Object.keys(devvit.hashContents(KEYS.counted(sunday.id))).join(' ')).not.toContain('t2_ann');
+    expect(devvit.hashContents(KEYS.shares(sunday.id))).toEqual({});
+    expect(devvit.hashContents(KEYS.streaks).t2_ann).toBe(streakBefore);
+
+    // What the others are shown: two solvers, two names, and a sculpture only bea built.
+    const result = parseResultResponse((await get(sunday, 'bea', '/result')).body);
+    expect(result?.status === 'ok' && result.result.solvers).toBe(2);
+    expect(result?.status === 'ok' && result.result.leaderboard.map((row) => row.username)).toEqual(['bea', 'cal']);
+    expect(result?.status === 'ok' && result.result.rarity.same).toBe(1);
+    expect(parseSplashResponse((await get(sunday, 'cal', '/splash')).body)?.solvers).toBe(2);
+    const gallery = parseGalleryResponse((await get(sunday, 'bea', '/gallery')).body);
+    expect(gallery?.status === 'ok' && gallery.gallery.entries.map((entry) => entry.first).sort()).toEqual(['bea', 'cal']);
   });
 
   it('sees the results without submitting, with no place of their own', async () => {

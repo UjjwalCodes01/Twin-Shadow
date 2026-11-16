@@ -16,7 +16,7 @@ import type { Puzzle } from '../shared/puzzle';
 import { sortBlocks, starsFor } from '../shared/score';
 import { motionNow, prefersReducedMotion } from './motion';
 import { createCrossFade, paintWall, type CrossFade, type WallKind } from './paint';
-import { blockText } from './result';
+import { blockText } from './count';
 import { showStars, starRow, starsLabel } from './stars';
 import type { GameState, Store } from './store';
 import { THEME } from './theme';

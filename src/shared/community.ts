@@ -35,33 +35,35 @@ export const boardFor = (size: Size): CommunityBoard | null =>
     (board) => board.size.w === size.w && board.size.d === size.d && board.size.h === size.h
   ) ?? null;
 
-/** The checks on the sculpture's shape, which need no search. */
+/**
+ * The checks on the sculpture's shape. They need no search, so the maker's
+ * checklist shows them live, and they alone decide whether a puzzle may be
+ * sent. Par is not among them: only the server's search settles it.
+ */
 export const SHAPE_CHECKS = ['floating', 'span', 'rectangle', 'different', 'height'] as const;
 export type ShapeCheck = (typeof SHAPE_CHECKS)[number];
 
-/** Every check, in the order the maker's checklist shows them. */
-export const CHECKS = [...SHAPE_CHECKS, 'par'] as const;
-export type Check = (typeof CHECKS)[number];
-
 /** What each check asks for, in plain words: the lines of the maker's checklist. */
-export const CHECK_TEXT: Record<Check, string> = {
+export const CHECK_TEXT: Record<ShapeCheck, string> = {
   floating: 'No floating blocks',
   span: 'Shadows reach across the walls',
   rectangle: 'Not plain rectangles',
   different: 'Two different shadows',
   height: 'Tall enough',
-  par: 'Right number of blocks to solve',
 };
 
 /** Why a puzzle that fails each check is refused, as the server says it. */
-export const CHECK_REFUSAL: Record<Check, string> = {
+export const CHECK_REFUSAL: Record<ShapeCheck, string> = {
   floating: 'Every block must rest on the floor or on another block.',
   span: 'Each shadow must reach across most of its wall.',
   rectangle: 'A shadow that is a plain rectangle is too easy. Give both some shape.',
   different: 'The two shadows must not be the same.',
   height: 'The sculpture is too low. Build it taller.',
-  par: 'It would take too few or too many blocks to solve.',
 };
+
+/** Which way par is out when a puzzle is refused for it: it needs more blocks to solve, or fewer. */
+export const PAR_REFUSALS = ['par-low', 'par-high'] as const;
+export type ParRefusal = (typeof PAR_REFUSALS)[number];
 
 /** The two shadows a sculpture casts, as grids and as the rows a puzzle stores. */
 export type Shadows = { front: Grid; side: Grid; frontRows: string[]; sideRows: string[] };
@@ -94,14 +96,23 @@ export const firstShapeFailure = (blocks: ReadonlySet<string>, board: CommunityB
 export const parInRange = (par: number, board: CommunityBoard): boolean =>
   par >= board.minPar && par <= board.maxPar;
 
+/** Which way a par is out of range for a board, or null when it is within it. */
+export const parRefusal = (par: number, board: CommunityBoard): ParRefusal | null => {
+  if (par < board.minPar) return 'par-low';
+  return par > board.maxPar ? 'par-high' : null;
+};
+
+/** What a maker is told when par is out of range: which way, by how much, and what to do about it. */
+export const parRefusalText = (refusal: ParRefusal, par: number, board: CommunityBoard): string =>
+  refusal === 'par-low'
+    ? `It needs more blocks to solve. It can be solved with ${par}, and a puzzle on this board must take at least ${board.minPar}. Make the shadows bigger and send it again.`
+    : `It needs fewer blocks to solve. It takes ${par}, and a puzzle on this board may take at most ${board.maxPar}. Make the shadows smaller and send it again.`;
+
 /** How hard par is searched for on a player's puzzle: as hard as for a generated one. */
 export const COMMUNITY_PAR_SEARCH: ParOptions = { parOrders: 200, parRefinements: 1500, parRefinementBlocks: 3 };
 
 /** The longest the server lets one par search run, in milliseconds. */
 export const SERVER_PAR_LIMIT_MS = 1500;
-
-/** The time the maker's checklist gives its own quick estimate of par, in milliseconds. */
-export const CHECKLIST_PAR_LIMIT_MS = 120;
 
 export type ParResult = {
   par: number;

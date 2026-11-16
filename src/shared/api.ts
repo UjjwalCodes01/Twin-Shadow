@@ -39,12 +39,21 @@ export type PuzzleResponse = {
   muted: boolean;
 };
 
+/**
+ * What became of the last puzzle a player sent: it waits for review, it was
+ * approved and is in line for a Sunday, it was used for the daily post of
+ * `date` (UTC, YYYY-MM-DD), or it was not approved. No reason is ever given.
+ */
+export type LastPuzzle = { status: 'waiting' | 'approved' | 'rejected' } | { status: 'used'; date: string };
+
 /** What the caller may do about puzzles made by players. */
 export type CommunityStatus = {
   /** Whether the caller may make and send a puzzle now. */
   canMake: boolean;
   /** Why not, in a sentence for the player, or null when they may. */
   why: string | null;
+  /** What became of the last puzzle the caller sent, or null when they have sent none. */
+  last: LastPuzzle | null;
   /** For a moderator of this community: how many puzzles wait for review. Null for everyone else. */
   review: number | null;
 };
@@ -74,16 +83,24 @@ export type ReviewPuzzle = {
 export const REVIEW_DECISIONS = ['approve', 'reject'] as const;
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
 
-/** Body of POST /api/community/review. */
-export type ReviewRequest = { id: string; decision: ReviewDecision };
+/**
+ * Body of POST /api/community/review. `at` is where in the line the
+ * moderator was looking, from 1, so the reply can show what stands there next.
+ */
+export type ReviewRequest = { id: string; decision: ReviewDecision; at: number };
 
 /**
  * Response of GET and POST /api/community/review: how many puzzles wait, and
- * the oldest of them, or null when none do. `refused` for anyone but a moderator.
+ * one of them with its place in the line, oldest first: "2 of 5" is
+ * `position` 2 of `waiting` 5. With none waiting, `position` is 0 and
+ * `puzzle` is null. `refused` for anyone but a moderator.
  */
 export type ReviewResponse =
-  | { status: 'ok'; waiting: number; puzzle: ReviewPuzzle | null }
+  | { status: 'ok'; waiting: number; position: number; puzzle: ReviewPuzzle | null }
   | { status: 'refused'; message: string };
+
+/** Body of POST /api/sound: what the device's sound set-up said when the first sound of a session was played. */
+export type SoundReport = { state: string };
 
 /** Body of POST /api/prefs. */
 export type PrefsRequest = { muted: boolean };
@@ -348,12 +365,23 @@ export const parseSubmission = (value: unknown): Submission | null => {
   return { blocks, par, stars, sculpture: [...sculpture] };
 };
 
+const isUtcDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+export const parseLastPuzzle = (value: unknown): LastPuzzle | null => {
+  if (!isRecord(value)) return null;
+  const { status, date } = value;
+  if (status === 'used') return isUtcDate(date) ? { status, date } : null;
+  return status === 'waiting' || status === 'approved' || status === 'rejected' ? { status } : null;
+};
+
 const parseCommunityStatus = (value: unknown): CommunityStatus | null => {
   if (!isRecord(value)) return null;
   const { canMake, why, review } = value;
   if (typeof canMake !== 'boolean' || (why !== null && typeof why !== 'string')) return null;
   if (review !== null && !isCount(review)) return null;
-  return { canMake, why, review };
+  const last = value.last === null ? null : parseLastPuzzle(value.last);
+  if (value.last !== null && !last) return null;
+  return { canMake, why, last, review };
 };
 
 const parseOnboarding = (value: unknown): Onboarding | null => {
@@ -416,7 +444,11 @@ const parseReviewPuzzle = (value: unknown): ReviewPuzzle | null => {
 export const parseReviewRequest = (value: unknown): ReviewRequest | null => {
   if (!isRecord(value) || typeof value.id !== 'string' || value.id === '') return null;
   const decision = REVIEW_DECISIONS.find((known) => known === value.decision);
-  return decision ? { id: value.id, decision } : null;
+  if (!decision) return null;
+  // A request that does not say where the moderator was looking is answered from the front of the line.
+  const { at } = value;
+  if (at !== undefined && !isCount(at)) return null;
+  return { id: value.id, decision, at: at === undefined ? 1 : Math.max(at, 1) };
 };
 
 export const parseReviewResponse = (value: unknown): ReviewResponse | null => {
@@ -424,11 +456,18 @@ export const parseReviewResponse = (value: unknown): ReviewResponse | null => {
   if (value.status === 'refused' && typeof value.message === 'string') {
     return { status: 'refused', message: value.message };
   }
-  if (value.status !== 'ok' || !isCount(value.waiting)) return null;
-  if (value.puzzle === null) return { status: 'ok', waiting: value.waiting, puzzle: null };
+  const { waiting, position } = value;
+  if (value.status !== 'ok' || !isCount(waiting) || !isCount(position) || position > waiting) return null;
+  if (value.puzzle === null) return { status: 'ok', waiting, position, puzzle: null };
   const puzzle = parseReviewPuzzle(value.puzzle);
-  return puzzle ? { status: 'ok', waiting: value.waiting, puzzle } : null;
+  return puzzle && position >= 1 ? { status: 'ok', waiting, position, puzzle } : null;
 };
+
+/** The state is only ever logged, so it is kept short and to plain letters. */
+export const parseSoundReport = (value: unknown): SoundReport | null =>
+  isRecord(value) && typeof value.state === 'string' && /^[a-z-]{1,16}$/.test(value.state)
+    ? { state: value.state }
+    : null;
 
 export const parsePrefsRequest = (value: unknown): PrefsRequest | null =>
   isRecord(value) && typeof value.muted === 'boolean' ? { muted: value.muted } : null;

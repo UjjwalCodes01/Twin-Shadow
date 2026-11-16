@@ -141,6 +141,13 @@ export const KEYS = {
   communitySent: 'community:sent',
 
   /**
+   * Hash, user id -> JSON: what became of the last puzzle each maker sent.
+   * Holds the puzzle's id and its status: 'waiting', 'approved', 'used' (with
+   * the UTC date of the post that used it) or 'rejected'. Never a reason.
+   */
+  communityLast: 'community:last',
+
+  /**
    * Hash, a daily post's place in the daily sequence -> the user id of the
    * player who made its puzzle. The maker cannot submit that day, so their
    * streak is carried across it instead of broken.

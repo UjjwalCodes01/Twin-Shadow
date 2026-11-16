@@ -3,6 +3,7 @@
 
 import type { JoinChoice, LeaderboardRow, MakerResult, Result } from '../shared/api';
 import { rarityPercent } from '../shared/share';
+import { blockText } from './count';
 import { showStars } from './stars';
 
 // --- Wording (no DOM, so it can be tested) ---------------------------------------
@@ -33,7 +34,7 @@ export const rarityText = ({ same, share, smallSample }: Result['rarity']): stri
 export const streakText = ({ current, best }: Result['streak']): string =>
   best > current ? `Streak: ${current} · Best: ${best}` : `Streak: ${current}`;
 
-export const blockText = (count: number): string => `${count} ${count === 1 ? 'block' : 'blocks'}`;
+export { blockText };
 
 /** "Community best: 8 blocks", marked when someone has beaten par. */
 export const recordText = ({ blocks, underPar }: Result['record']): string =>

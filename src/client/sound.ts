@@ -39,17 +39,31 @@ export type Sounds = {
 
 /** How loud everything is, out of 1. Kept low: this plays in a feed. */
 const VOLUME = 0.32;
+/** How long after the first sound is asked for the device is asked whether sound is really running. */
+const FIRST_SOUND_CHECK_MS = 300;
 
-export const createSounds = (): Sounds => {
+/**
+ * `onFirstSound` is told once, shortly after the first sound of the session
+ * is played, what the device's audio set-up says of itself: 'running' is
+ * sound that can be heard. Nothing is told while sound is off.
+ */
+export const createSounds = (onFirstSound: (state: string) => void = () => {}): Sounds => {
   let context: AudioContext | null = null;
   let master: GainNode | null = null;
   let muted = false;
+  let reported = false;
 
   /** The audio set-up, or null where there is none to be had or the player has not tapped yet. */
   const ready = (): { context: AudioContext; master: GainNode } | null => {
     if (muted || !context || !master) return null;
     // A browser may put sound to sleep when the page is left; waking it is harmless.
     if (context.state === 'suspended') void context.resume().catch(() => {});
+    if (!reported) {
+      reported = true;
+      const audio = context;
+      // A moment later, so a set-up that was still waking has had time to say so.
+      window.setTimeout(() => onFirstSound(audio.state), FIRST_SOUND_CHECK_MS);
+    }
     return { context, master };
   };
 

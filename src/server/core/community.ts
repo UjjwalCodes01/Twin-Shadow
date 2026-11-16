@@ -6,14 +6,15 @@
 // that leave are the puzzle (two silhouettes and par) and the maker's username.
 
 import { redis } from '@devvit/web/server';
-import type { CommunityStatus, ReviewDecision, ReviewPuzzle } from '../../shared/api';
-import { parsePuzzle } from '../../shared/api';
+import type { CommunityStatus, LastPuzzle, ReviewDecision, ReviewPuzzle } from '../../shared/api';
+import { parseLastPuzzle, parsePuzzle } from '../../shared/api';
 import {
   boardFor,
   castShadows,
   CHECK_REFUSAL,
   firstShapeFailure,
-  parInRange,
+  parRefusal,
+  parRefusalText,
   puzzleKey,
   SERVER_PAR_LIMIT_MS,
   workOutPar,
@@ -53,7 +54,8 @@ export type SendRefusal =
   | 'rectangle'
   | 'different'
   | 'height'
-  | 'par';
+  | 'par-low'
+  | 'par-high';
 
 export type SendOutcome =
   | { status: 'sent'; par: number }
@@ -101,11 +103,45 @@ const blockedBecause = async (userId: string, now: number): Promise<SendOutcome 
   return null;
 };
 
+// --- What became of a maker's last puzzle ------------------------------------------
+
+/** Remembers what has become of a puzzle, as the last thing its maker is told about it. */
+const setLast = (userId: string, id: string, last: LastPuzzle): Promise<number> =>
+  redis.hSet(KEYS.communityLast, { [userId]: JSON.stringify({ id, ...last }) });
+
+/**
+ * Moves a puzzle's status on, but only while it is still the last puzzle its
+ * maker sent: news of an older one never replaces the status of a newer one.
+ */
+const moveLast = async (userId: string, id: string, last: LastPuzzle): Promise<void> => {
+  const json = await redis.hGet(KEYS.communityLast, userId);
+  if (json === undefined) return;
+  const value: unknown = JSON.parse(json);
+  if (typeof value !== 'object' || value === null || !('id' in value) || value.id !== id) return;
+  await setLast(userId, id, last);
+};
+
+/** What became of the last puzzle a player sent, or null when they have sent none. */
+const lastPuzzle = async (userId: string): Promise<LastPuzzle | null> => {
+  const json = await redis.hGet(KEYS.communityLast, userId);
+  const last = json === undefined ? null : parseLastPuzzle(JSON.parse(json));
+  if (last) return last;
+  // A puzzle sent before this was kept has no record, but its waiting slot says enough.
+  return (await redis.hGet(KEYS.communityPendingByMaker, userId)) === undefined ? null : { status: 'waiting' };
+};
+
+/** Records that an approved puzzle has been used for the post of `date` (UTC, YYYY-MM-DD). */
+export const markUsed = ({ puzzle, maker }: CommunityPuzzle, date: string): Promise<void> =>
+  moveLast(maker.userId, puzzle.id, { status: 'used', date });
+
 /** What a player may do about community puzzles, for the game to show. `review` is filled in by the route. */
 export const makerStatus = async (userId: string | undefined, now: number): Promise<Omit<CommunityStatus, 'review'>> => {
-  if (!userId) return { canMake: false, why: 'Log in to make a puzzle.' };
+  if (!userId) return { canMake: false, why: 'Log in to make a puzzle.', last: null };
   const blocked = await blockedBecause(userId, now);
-  return blocked?.status === 'refused' ? { canMake: false, why: blocked.message } : { canMake: true, why: null };
+  const last = await lastPuzzle(userId);
+  return blocked?.status === 'refused'
+    ? { canMake: false, why: blocked.message, last }
+    : { canMake: true, why: null, last };
 };
 
 // --- Sending a puzzle ------------------------------------------------------------
@@ -161,13 +197,9 @@ export const sendPuzzle = async (
 
   // Par, against the clock: one request must never run long.
   const { par, solution } = workOutPar([...blocks], size, { until: Date.now() + SERVER_PAR_LIMIT_MS, now: Date.now });
-  if (!parInRange(par, board)) {
-    const message =
-      par < board.minPar
-        ? `It can be solved with ${par} blocks, which is too few. It needs at least ${board.minPar}.`
-        : `It takes ${par} blocks to solve, which is too many. Keep it to ${board.maxPar}.`;
-    return refuse('par', message);
-  }
+  // Said plainly, which way it is out: the maker has no way to see par while building.
+  const outOfRange = parRefusal(par, board);
+  if (outOfRange) return refuse(outOfRange, parRefusalText(outOfRange, par, board));
 
   const number = await redis.incrBy(KEYS.communityCounter, 1);
   const id = `cp-${String(number).padStart(4, '0')}`;
@@ -189,6 +221,7 @@ export const sendPuzzle = async (
   await redis.zAdd(KEYS.communityPendingOrder, { member: id, score: now });
   const sends = [...(await recentSends(maker.userId, now)), now];
   await redis.hSet(KEYS.communitySent, { [maker.userId]: JSON.stringify(sends) });
+  await setLast(maker.userId, id, { status: 'waiting' });
   return { status: 'sent', par };
 };
 
@@ -206,12 +239,21 @@ const forReview = ({ puzzle, maker }: CommunityPuzzle): ReviewPuzzle => ({
   maker: maker.username,
 });
 
-/** The puzzle that has waited longest, or null when none waits. */
-export const oldestPending = async (): Promise<ReviewPuzzle | null> => {
-  const [oldest] = await redis.zRange(KEYS.communityPendingOrder, 0, 0, { by: 'rank' });
-  if (!oldest) return null;
-  const stored = parseStored(await redis.hGet(KEYS.communityPending, oldest.member));
-  return stored ? forReview(stored) : null;
+/** One waiting puzzle and where it stands in the line, oldest first. */
+export type Waiting = { waiting: number; position: number; puzzle: ReviewPuzzle | null };
+
+/**
+ * The puzzle at a place in the line of those waiting, counted from 1 with the
+ * one that has waited longest first. A place past the end gives the last
+ * puzzle; with none waiting the place is 0 and there is no puzzle.
+ */
+export const pendingAt = async (at: number): Promise<Waiting> => {
+  const waiting = await pendingCount();
+  if (waiting === 0) return { waiting, position: 0, puzzle: null };
+  const position = Math.min(Math.max(Math.trunc(at) || 1, 1), waiting);
+  const [found] = await redis.zRange(KEYS.communityPendingOrder, position - 1, position - 1, { by: 'rank' });
+  const stored = found ? parseStored(await redis.hGet(KEYS.communityPending, found.member)) : null;
+  return { waiting, position, puzzle: stored ? forReview(stored) : null };
 };
 
 /**
@@ -236,6 +278,8 @@ export const reviewPuzzle = async (id: string, decision: ReviewDecision, now: nu
   } else {
     await redis.hDel(KEYS.communityKeys, [puzzleKey(puzzle.front, puzzle.side)]);
   }
+  // What the maker is told the next time they open "Make a puzzle". Never why.
+  await moveLast(stored.maker.userId, id, { status: decision === 'approve' ? 'approved' : 'rejected' });
   return true;
 };
 

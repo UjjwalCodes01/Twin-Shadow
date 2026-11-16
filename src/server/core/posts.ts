@@ -1,7 +1,7 @@
 import { reddit, redis } from '@devvit/web/server';
 import { parsePuzzle } from '../../shared/api';
 import { isCommunityDay, tierForDate, type Puzzle, type Tier } from '../../shared/puzzle';
-import { takeApproved, type Maker } from './community';
+import { markUsed, takeApproved, type CommunityPuzzle, type Maker } from './community';
 import { KEYS } from './keys';
 import { puzzlesOfTier } from './queue';
 
@@ -57,8 +57,16 @@ const nextPuzzleOfTier = async (tier: Tier): Promise<Puzzle> => {
  * Creates one post. The one way posts are made: the daily job, the install
  * trigger and the moderator menu item all end up here. The puzzle comes from
  * the tier for the current UTC weekday, and the post keeps its own copy.
+ *
+ * TEMPORARY: `communityNow` makes a post from the oldest approved community
+ * puzzle whatever the day and the kind, for the dev subreddit's test menu
+ * item. To remove: delete the parameter and its one use below.
  */
-export const createNextPost = async (kind: PostKind, now: Date = new Date()): Promise<CreatedPost> => {
+export const createNextPost = async (
+  kind: PostKind,
+  now: Date = new Date(),
+  communityNow = false
+): Promise<CreatedPost> => {
   const number = await redis.incrBy(KEYS.postCounter, 1);
   const post = await reddit.submitCustomPost({
     title: `Twin Shadows #${number}`,
@@ -68,15 +76,18 @@ export const createNextPost = async (kind: PostKind, now: Date = new Date()): Pr
   // number but never a puzzle or a place in the daily sequence.
   // On the community's day the daily post is the approved puzzle that has
   // waited longest. With none waiting, it is the generated puzzle as usual.
-  const community = kind === 'daily' && isCommunityDay(now) ? await takeApproved() : null;
+  const fromCommunity = communityNow || (kind === 'daily' && isCommunityDay(now));
+  const community: CommunityPuzzle | null = fromCommunity ? await takeApproved() : null;
   const puzzle = community ? community.puzzle : await nextPuzzleOfTier(tierForDate(now));
   const maker = community ? community.maker : null;
   const daily = kind === 'daily' ? await redis.incrBy(KEYS.dailyCounter, 1) : null;
   const record: PostRecord = { number, kind, daily, date: utcDate(now), puzzle, maker };
   await redis.set(KEYS.post(post.id), JSON.stringify(record));
-  if (maker) {
+  if (community && maker) {
     // The maker cannot submit their own puzzle; this lets their streak carry across the day.
     if (daily !== null) await redis.hSet(KEYS.dailyMakers, { [String(daily)]: maker.userId });
+    // What the maker is told when they next open "Make a puzzle".
+    await markUsed(community, record.date);
     await creditMaker(post.id, maker.username);
   }
   return { ...record, postId: post.id };

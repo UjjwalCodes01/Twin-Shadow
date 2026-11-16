@@ -63,18 +63,25 @@ export const getSubmission = async (
   return stored ? forPlayer(stored, puzzle) : null;
 };
 
-export type StoreOutcome = {
-  status: 'accepted' | 'already-submitted';
-  submission: Submission;
-  /** The record now in Redis: the new one when accepted, the earlier one otherwise. */
-  stored: StoredSubmission;
-};
+export type StoreOutcome =
+  | {
+      status: 'accepted' | 'already-submitted';
+      submission: Submission;
+      /** The record now in Redis: the new one when accepted, the earlier one otherwise. */
+      stored: StoredSubmission;
+    }
+  /** The player made this post's puzzle. Nothing was stored. */
+  | { status: 'own-puzzle' };
 
 /**
  * Stores a sculpture the caller has already checked with isSolved. Only a
  * player's first submission for a post is kept: hSetNX writes only when the
  * field is new, so of two requests at once exactly one is 'accepted'.
  * Routes call acceptSubmission in scores.ts, which also updates the counts.
+ *
+ * The maker of the post's puzzle is turned away here, before anything is
+ * written, whatever the route did: a maker knows the answer, so no record of
+ * theirs may exist for the leaderboard, the counts or the gallery to pick up.
  */
 export const storeSubmission = async (
   postId: string,
@@ -84,6 +91,7 @@ export const storeSubmission = async (
   now: number
 ): Promise<StoreOutcome> => {
   const { userId, username } = player;
+  if (post.maker?.userId === userId) return { status: 'own-puzzle' };
   const record: StoredSubmission = {
     userId,
     username,

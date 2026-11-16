@@ -10,7 +10,10 @@ import {
   parsePuzzle,
   parsePuzzleResponse,
   parseResultResponse,
+  parseReviewRequest,
+  parseReviewResponse,
   parseShareResponse,
+  parseSoundReport,
   parseSplashResponse,
   parseSubmitRequest,
   parseSubmitResponse,
@@ -111,7 +114,7 @@ describe('parsePuzzleResponse', () => {
     post: 12,
     maker: null,
     yours: false,
-    community: { canMake: true, why: null, review: null },
+    community: { canMake: true, why: null, last: null, review: null },
     muted: false,
     ...changes,
   });
@@ -126,19 +129,36 @@ describe('parsePuzzleResponse', () => {
       post: 12,
       maker: null,
       yours: false,
-      community: { canMake: true, why: null, review: null },
+      community: { canMake: true, why: null, last: null, review: null },
       muted: false,
     });
   });
 
   it('accepts a community puzzle`s credit, a moderator`s count and a reason for not making one', () => {
     const parsed = parsePuzzleResponse(
-      response({ maker: 'ann', yours: true, muted: true, community: { canMake: false, why: 'Not yet.', review: 3 } })
+      response({
+        maker: 'ann',
+        yours: true,
+        muted: true,
+        community: { canMake: false, why: 'Not yet.', last: { status: 'waiting' }, review: 3 },
+      })
     );
     expect(parsed?.maker).toBe('ann');
     expect(parsed?.yours).toBe(true);
     expect(parsed?.muted).toBe(true);
-    expect(parsed?.community).toEqual({ canMake: false, why: 'Not yet.', review: 3 });
+    expect(parsed?.community).toEqual({ canMake: false, why: 'Not yet.', last: { status: 'waiting' }, review: 3 });
+  });
+
+  it('accepts each thing that can have become of the caller`s last puzzle', () => {
+    const lastOf = (last: unknown): unknown =>
+      parsePuzzleResponse(response({ community: { canMake: true, why: null, last, review: null } }))?.community.last;
+    for (const status of ['waiting', 'approved', 'rejected']) expect(lastOf({ status })).toEqual({ status });
+    expect(lastOf({ status: 'used', date: '2026-12-06' })).toEqual({ status: 'used', date: '2026-12-06' });
+    // Nothing else comes through with it: no puzzle id, and never a reason.
+    expect(lastOf({ status: 'rejected', id: 'cp-0001', reason: 'too easy' })).toEqual({ status: 'rejected' });
+    for (const last of [{ status: 'used' }, { status: 'used', date: 'Sunday' }, { status: 'lost' }, {}, 'waiting']) {
+      expect(parsePuzzleResponse(response({ community: { canMake: true, why: null, last, review: null } }))).toBeNull();
+    }
   });
 
   it('rejects a missing or wrong credit, count or sound setting', () => {
@@ -148,9 +168,10 @@ describe('parsePuzzleResponse', () => {
       { yours: 'no' },
       { muted: undefined },
       { community: undefined },
-      { community: { canMake: true, why: null } },
-      { community: { canMake: true, why: 3, review: null } },
-      { community: { canMake: true, why: null, review: -1 } },
+      { community: { canMake: true, why: null, last: null } },
+      { community: { canMake: true, why: null, review: null } },
+      { community: { canMake: true, why: 3, last: null, review: null } },
+      { community: { canMake: true, why: null, last: null, review: -1 } },
     ]) {
       expect(parsePuzzleResponse(response(changes)), JSON.stringify(changes)).toBeNull();
     }
@@ -467,5 +488,77 @@ describe('parseSplashResponse', () => {
     for (const changes of bad) expect(parseSplashResponse({ ...splash, ...changes }), JSON.stringify(changes)).toBeNull();
     expect(parseSplashResponse({ status: 'error', message: 'This post has no puzzle.' })).toBeNull();
     expect(parseSplashResponse(null)).toBeNull();
+  });
+});
+
+describe('parseReviewRequest and parseReviewResponse', () => {
+  const puzzle = { id: 'cp-0002', size: { w: 4, d: 4, h: 4 }, front: ['....', '....', '#...', '####'], side: ['....', '#...', '#...', '####'], par: 7, maker: 'ann' };
+
+  it('reads a decision and the place in the line the moderator was looking at', () => {
+    expect(parseReviewRequest({ id: 'cp-0002', decision: 'approve', at: 2 })).toEqual({ id: 'cp-0002', decision: 'approve', at: 2 });
+    expect(parseReviewRequest({ id: 'cp-0002', decision: 'reject', at: 5 })).toEqual({ id: 'cp-0002', decision: 'reject', at: 5 });
+  });
+
+  it('takes a request with no place, or place 0, as the front of the line', () => {
+    expect(parseReviewRequest({ id: 'cp-0002', decision: 'approve' })?.at).toBe(1);
+    expect(parseReviewRequest({ id: 'cp-0002', decision: 'approve', at: 0 })?.at).toBe(1);
+  });
+
+  it('rejects a request it cannot read', () => {
+    for (const body of [
+      { id: 'cp-0002' },
+      { id: '', decision: 'approve' },
+      { id: 'cp-0002', decision: 'maybe' },
+      { id: 'cp-0002', decision: 'approve', at: -1 },
+      { id: 'cp-0002', decision: 'approve', at: 1.5 },
+      { id: 'cp-0002', decision: 'approve', at: '2' },
+      null,
+    ]) {
+      expect(parseReviewRequest(body), JSON.stringify(body)).toBeNull();
+    }
+  });
+
+  it('reads a waiting puzzle with its place in the line', () => {
+    expect(parseReviewResponse({ status: 'ok', waiting: 5, position: 2, puzzle })).toEqual({
+      status: 'ok',
+      waiting: 5,
+      position: 2,
+      puzzle,
+    });
+  });
+
+  it('reads an empty line, and a refusal', () => {
+    expect(parseReviewResponse({ status: 'ok', waiting: 0, position: 0, puzzle: null })).toEqual({
+      status: 'ok',
+      waiting: 0,
+      position: 0,
+      puzzle: null,
+    });
+    expect(parseReviewResponse({ status: 'refused', message: 'No.' })).toEqual({ status: 'refused', message: 'No.' });
+  });
+
+  it('rejects a place that cannot be: missing, past the end, or none for a puzzle that is there', () => {
+    for (const body of [
+      { status: 'ok', waiting: 5, puzzle },
+      { status: 'ok', waiting: 5, position: 6, puzzle },
+      { status: 'ok', waiting: 5, position: 0, puzzle },
+      { status: 'ok', waiting: 5, position: 2, puzzle: { ...puzzle, maker: 7 } },
+      { status: 'ok', position: 1, puzzle },
+    ]) {
+      expect(parseReviewResponse(body), JSON.stringify(body)).toBeNull();
+    }
+  });
+});
+
+describe('parseSoundReport', () => {
+  it('reads the state a device`s sound was in', () => {
+    expect(parseSoundReport({ state: 'running' })).toEqual({ state: 'running' });
+    expect(parseSoundReport({ state: 'suspended', more: 'ignored' })).toEqual({ state: 'suspended' });
+  });
+
+  it('rejects anything that is not a short plain word, since it is written to the log', () => {
+    for (const body of [{ state: '' }, { state: 'Running\nforged line' }, { state: 'x'.repeat(40) }, { state: 3 }, {}, null]) {
+      expect(parseSoundReport(body), JSON.stringify(body)).toBeNull();
+    }
   });
 });

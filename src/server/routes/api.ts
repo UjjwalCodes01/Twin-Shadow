@@ -18,6 +18,7 @@ import {
   parseJoinRequest,
   parseOnboardingRequest,
   parsePrefsRequest,
+  parseSoundReport,
   parseSubmitRequest,
 } from '../../shared/api';
 import { makerStatus, pendingCount } from '../core/community';
@@ -119,6 +120,18 @@ api.post('/prefs', async (c) => {
   return c.json({ status: 'ok' });
 });
 
+// One log line the first time a session plays a sound, so it can be seen in
+// `devvit logs` that sound really starts on players' devices. Nothing is
+// stored. `state` is what the device's audio set-up said at that moment:
+// 'running' is sound that can be heard.
+api.post('/sound', async (c) => {
+  const body: unknown = await c.req.json().catch(() => null);
+  const report = parseSoundReport(body);
+  if (!report) return c.json({ status: 'failed', message: 'That could not be read.' }, 400);
+  console.log(`Sound: first sound of a session for ${context.username ?? 'a logged-out visitor'} (audio ${report.state})`);
+  return c.json({ status: 'ok' });
+});
+
 // Remembers that a first-time player has finished or skipped the warm-up, or
 // has seen the first-solve hint, so neither is shown to them again.
 api.post('/onboarding', async (c) => {
@@ -166,14 +179,10 @@ api.post('/submit', async (c) => {
   if (!isSolved(new Set(request.blocks), post.puzzle)) return reject('not-solved');
 
   const username = context.username ?? (await reddit.getCurrentUsername()) ?? 'unknown';
-  const { status, submission } = await acceptSubmission(
-    postId,
-    post,
-    { userId, username },
-    request.blocks,
-    Date.now()
-  );
-  return c.json<SubmitResponse>({ status, submission });
+  const outcome = await acceptSubmission(postId, post, { userId, username }, request.blocks, Date.now());
+  // Checked above already; the store checks again for itself.
+  if (outcome.status === 'own-puzzle') return reject('own-puzzle');
+  return c.json<SubmitResponse>({ status: outcome.status, submission: outcome.submission });
 });
 
 const NOT_SUBMITTED = { status: 'not-submitted', message: 'Submit your solution to see the results.' } as const;

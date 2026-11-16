@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
 import type { MakePuzzleResponse, ReviewResponse } from '../../shared/api';
 import { parseMakePuzzleRequest, parseReviewRequest } from '../../shared/api';
-import { oldestPending, pendingCount, reviewPuzzle, sendPuzzle } from '../core/community';
+import { pendingAt, reviewPuzzle, sendPuzzle } from '../core/community';
 import { callerIsModerator } from '../core/moderators';
 
 // Mounted at /api/community in index.ts.
@@ -35,17 +35,14 @@ community.post('/puzzles', async (c) => {
 
 const NOT_A_MODERATOR = { status: 'refused', message: 'Only moderators can review puzzles.' } as const;
 
-/** How many puzzles wait, and the one that has waited longest. */
-const waiting = async (): Promise<ReviewResponse> => ({
-  status: 'ok',
-  waiting: await pendingCount(),
-  puzzle: await oldestPending(),
-});
+/** How many puzzles wait, and the one at a place in the line, oldest first. */
+const waiting = async (at: number): Promise<ReviewResponse> => ({ status: 'ok', ...(await pendingAt(at)) });
 
 // Both review routes check for themselves that the caller moderates this subreddit.
+// `?at=2` asks for the second puzzle in the line; without it, the one that has waited longest.
 community.get('/review', async (c) => {
   if (!(await callerIsModerator())) return c.json<ReviewResponse>(NOT_A_MODERATOR, 403);
-  return c.json<ReviewResponse>(await waiting());
+  return c.json<ReviewResponse>(await waiting(Number(c.req.query('at'))));
 });
 
 community.post('/review', async (c) => {
@@ -58,6 +55,7 @@ community.post('/review', async (c) => {
   if (!request) return c.json<ReviewResponse>({ status: 'refused', message: 'That review could not be read.' }, 400);
   const done = await reviewPuzzle(request.id, request.decision, Date.now());
   if (done) console.log(`Community puzzle ${request.id}: ${request.decision} by ${context.username ?? 'a moderator'}`);
-  // Whether or not this review was the one that counted, the answer is what waits now.
-  return c.json<ReviewResponse>(await waiting());
+  // Whether or not this review was the one that counted, the answer is what now
+  // stands where the moderator was looking: the next puzzle in the line.
+  return c.json<ReviewResponse>(await waiting(request.at));
 });

@@ -169,6 +169,8 @@
     <div class="result-layer" id="make-layer" hidden>
       <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="make-title">
         <h2 class="result-title" id="make-title">Make a puzzle</h2>
+        <!-- What became of the last puzzle they sent, when they have sent one. -->
+        <p class="card-text" id="make-last" role="status" hidden></p>
         <p class="card-text" id="make-text"></p>
         <div class="card-actions">
           <div class="card-row" id="make-boards">
@@ -192,13 +194,17 @@
       </section>
     </div>
 
-    <!-- Moderators only: one waiting puzzle at a time. -->
+    <!-- Moderators only: one waiting puzzle at a time, with a way along the line. -->
     <div class="result-layer" id="review-layer" hidden>
       <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="review-title">
         <h2 class="result-title" id="review-title">Review</h2>
         <p class="result-status" id="review-status" role="status"></p>
         <div class="review-body" id="review-body" hidden>
-          <p class="result-line" id="review-waiting"></p>
+          <div class="review-nav">
+            <button id="review-prev" type="button" aria-label="Previous puzzle">&lsaquo; Prev</button>
+            <p class="result-line" id="review-waiting" role="status"></p>
+            <button id="review-next" type="button" aria-label="Next puzzle">Next &rsaquo;</button>
+          </div>
           <div class="review-panels">
             <figure class="review-panel front">
               <figcaption>Front</figcaption>

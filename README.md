@@ -22,7 +22,7 @@ This is an early prototype. A new puzzle is posted each day from a generated que
 - The first result card offers **Join** to follow the community for the daily puzzle. Joining or choosing **No thanks** settles it; you are not asked again.
 - The first time you open the game you get a short warm-up on a small puzzle, with hints that appear one at a time. **Skip** leaves it at once, and the **?** button on the board replays it. Nothing in the warm-up is scored.
 - In the feed, each post shows the day's two shadows, how many players have solved it and, once you have, your stars and blocks.
-- Once you have solved a daily puzzle you can make one. **Make a puzzle** (on the result card, or under **?**) gives you an empty board and a short checklist; when every line is ticked you can send it. The game works out how many blocks it takes to solve, a moderator looks at it, and approved puzzles are used on Sundays with your username as the credit. You are not ranked on your own puzzle.
+- Once you have solved a daily puzzle you can make one. **Make a puzzle** (on the result card, or under **?**) gives you an empty board and a short checklist about the sculpture's shape; when every line is ticked you can send it. The game then works out how many blocks it takes to solve, and if that is too few or too many it says which, and you keep building. A moderator looks at what you send, and approved puzzles are used on Sundays with your username as the credit. Next time you open **Make a puzzle** it tells you what became of your last one. You are not ranked on your own puzzle.
 - The speaker button in the corner of the board turns the sound off.
 - Your streak counts daily puzzles solved in a row, each on the day it was the newest. Solving an older puzzle never changes it. A best streak of 3, 7 or 30 days earns a flair in the community.
 
@@ -48,7 +48,7 @@ The game cannot load its puzzle outside Reddit, because the server only runs the
 | Path | Contents |
 | --- | --- |
 | `src/shared/` | Puzzle types, game rules and response validation, used by both sides |
-| `src/client/` | The three.js board, tap input, the HTML controls and the look (`theme.ts` holds every colour, font and material; `paint.ts` draws the paper walls, table and wood grain in code). `fonts/` holds the bundled font with its licence |
+| `src/client/` | The three.js board, tap input, the HTML controls and the look. `game.ts` is the page's small first script; `play.ts` is the game; `later.ts` is what loads only when wanted (the result card, the gallery, making and reviewing puzzles). (`theme.ts` holds every colour, font and material; `paint.ts` draws the paper walls, table and wood grain in code). `fonts/` holds the bundled font with its licence |
 | `src/server/` | The Hono server: the puzzle, submit, result, gallery, share and join endpoints, post creation, the daily job, leaderboards, streaks and flair |
 | `src/generator/` | The offline puzzle generator, run with `npm run generate` |
 | `devvit.json` | App configuration: entry points, menu item, install trigger and the scheduled task |

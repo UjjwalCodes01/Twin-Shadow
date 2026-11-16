@@ -2,52 +2,67 @@
 // the empty board they build on. No DOM. The rules are the shared ones the
 // server checks again when the puzzle is sent.
 
+import type { LastPuzzle } from '../shared/api';
 import {
   CHECK_TEXT,
-  CHECKLIST_PAR_LIMIT_MS,
-  parInRange,
   SHAPE_CHECKS,
   shapeChecks,
-  workOutPar,
-  type Check,
   type CommunityBoard,
+  type ParRefusal,
+  type ShapeCheck,
 } from '../shared/community';
 import type { Puzzle, Size } from '../shared/puzzle';
+import { dateText } from './splashText';
 
-/** One line of the checklist: met, not yet met, or (null) still being worked out. */
-export type ChecklistLine = { check: Check; text: string; met: boolean | null };
+/** One line of the checklist: a rule about the sculpture's shape, met or not yet. */
+export type ChecklistLine = { check: ShapeCheck; text: string; met: boolean };
 
 export type Checklist = {
   lines: ChecklistLine[];
+  /** Said under the lines: what is not checked until the puzzle is sent, or how the last try came back. */
+  note: string;
   /** True when every line is met, so the puzzle can be sent. */
   ready: boolean;
 };
 
-/**
- * The checklist for a sculpture. `par` is the estimate of how many blocks
- * solve it, or null while that is not known yet.
- */
-export const checklist = (blocks: ReadonlySet<string>, board: CommunityBoard, par: number | null): Checklist => {
-  const shape = shapeChecks(blocks, board);
-  const lines: ChecklistLine[] = SHAPE_CHECKS.map((check) => ({ check, text: CHECK_TEXT[check], met: shape[check] }));
-  // Par can only be worked out for a sculpture with nothing floating.
-  const parMet = !shape.floating ? false : par === null ? null : parInRange(par, board);
-  lines.push({ check: 'par', text: CHECK_TEXT.par, met: parMet });
-  return { lines, ready: lines.every((line) => line.met === true) };
+/** How many blocks a puzzle takes to solve is only settled by the server's search, when it is sent. */
+export const PAR_NOTE = 'The number of blocks to solve is checked when you send it.';
+
+/** Said in place of the note while the board still holds a sculpture the server sent back over par. */
+export const PAR_REFUSED_NOTE: Record<ParRefusal, string> = {
+  'par-low': 'Sent back: it needs more blocks to solve. Make the shadows bigger.',
+  'par-high': 'Sent back: it needs fewer blocks to solve. Make the shadows smaller.',
 };
 
 /**
- * A quick estimate of par, for the checklist. Null for a sculpture it cannot
- * be worked out for: an empty board, or one with a block floating. The server
- * searches harder when the puzzle is sent, so its par can be a little lower.
+ * The checklist for a sculpture. Only the shape rules decide whether it can
+ * be sent. `sentBack` is how the server refused this very sculpture over par,
+ * if it did: the note says so until the sculpture changes.
  */
-export const estimatePar = (
+export const checklist = (
   blocks: ReadonlySet<string>,
   board: CommunityBoard,
-  now: () => number = () => performance.now()
-): number | null => {
-  if (!shapeChecks(blocks, board).floating) return null;
-  return workOutPar([...blocks], board.size, { until: now() + CHECKLIST_PAR_LIMIT_MS, now }).par;
+  sentBack: ParRefusal | null = null
+): Checklist => {
+  const shape = shapeChecks(blocks, board);
+  const lines: ChecklistLine[] = SHAPE_CHECKS.map((check) => ({ check, text: CHECK_TEXT[check], met: shape[check] }));
+  return {
+    lines,
+    note: sentBack === null ? PAR_NOTE : PAR_REFUSED_NOTE[sentBack],
+    ready: lines.every((line) => line.met),
+  };
+};
+
+/**
+ * What became of the last puzzle a player sent, in a sentence. A puzzle that
+ * was not approved is never given a reason. `canMake` is whether they may
+ * make another now, which is only said when it is true.
+ */
+export const lastPuzzleText = (last: LastPuzzle, canMake: boolean): string => {
+  if (last.status === 'waiting') return 'Your last puzzle is waiting for review.';
+  if (last.status === 'approved') return 'Your last puzzle was approved. It is in line for a Sunday.';
+  if (last.status === 'used') return `Your last puzzle was used on ${dateText(last.date)}.`;
+  return `Your last puzzle was not picked this time.${canMake ? ' You can make another.' : ''}`;
 };
 
 /** "5 × 5 × 5". */

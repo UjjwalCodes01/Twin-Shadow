@@ -2,11 +2,8 @@
 
 import type { SplashResponse } from '../shared/api';
 
-/**
- * The creator credit shown under the button.
- * TODO(owner): confirm the exact text wanted here.
- */
-export const CREATOR_CREDIT = 'by u/Significant_You460';
+/** Who made the game, shown under the button. A puzzle's maker is credited in the heading instead. */
+export const CREATOR_CREDIT = 'Game by u/Significant_You460';
 
 export const DESCRIPTION = 'Build one sculpture that casts both shadows.';
 
@@ -33,11 +30,17 @@ export const dateText = (date: string): string => {
 };
 
 /**
- * "Puzzle #12 · 30 November 2026", or for a puzzle a player made,
- * "Puzzle #12 by u/maker · 6 December 2026".
+ * The heading under the name, as lines of phrases. A phrase is never broken
+ * across lines: the puzzle's number, its maker and its date each stay whole.
+ *
+ * A generated puzzle has one line, "Puzzle #12" "· 30 November 2026". A
+ * puzzle a player made has two: "Puzzle #12" "by u/maker", then the date on
+ * a line of its own, so a long username never squeezes it.
  */
-export const headingText = ({ number, date, maker }: Pick<SplashResponse, 'number' | 'date' | 'maker'>): string =>
-  `Puzzle #${number}${maker === null ? '' : ` by u/${maker}`} · ${dateText(date)}`;
+export const headingLines = ({ number, date, maker }: Pick<SplashResponse, 'number' | 'date' | 'maker'>): string[][] =>
+  maker === null
+    ? [[`Puzzle #${number}`, `· ${dateText(date)}`]]
+    : [[`Puzzle #${number}`, `by u/${maker}`], [dateText(date)]];
 
 /** The line under the panels for a player who has solved the post: "9 blocks · par 7". */
 export const playedText = ({ blocks, par }: { blocks: number; par: number }): string =>
