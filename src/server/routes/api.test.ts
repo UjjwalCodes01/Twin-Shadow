@@ -77,7 +77,9 @@ describe('GET /api/puzzle', () => {
     await openNewPost(ALICE);
     const { body } = await get('/puzzle');
     expect(JSON.stringify(body)).not.toContain('parIsOptimal');
-    expect(Object.keys(Object(body)).sort()).toEqual(['canSubmit', 'debug', 'onboarding', 'puzzle', 'submission']);
+    expect(Object.keys(Object(body)).sort()).toEqual(
+      ['canSubmit', 'community', 'debug', 'maker', 'muted', 'onboarding', 'post', 'puzzle', 'submission', 'yours'].sort()
+    );
     expect(Object.keys(Object(parsePuzzleResponse(body)?.puzzle)).sort()).toEqual(
       ['front', 'id', 'number', 'par', 'side', 'size', 'tier'].sort()
     );

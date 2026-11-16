@@ -104,6 +104,7 @@ describe('GET /api/splash', () => {
       played: null,
       streak: 0,
       solvers: 0,
+      maker: null,
     });
   });
 
@@ -161,7 +162,7 @@ describe('GET /api/splash', () => {
       expect(text).not.toContain('parIsOptimal');
       expect(text).not.toContain('sculpture');
       expect(Object.keys(Object(body)).sort()).toEqual(
-        ['date', 'front', 'number', 'played', 'side', 'size', 'solvers', 'streak'].sort()
+        ['date', 'front', 'maker', 'number', 'played', 'side', 'size', 'solvers', 'streak'].sort()
       );
     }
     // Par is only sent with the caller's own result, once they have solved it.

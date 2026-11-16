@@ -36,6 +36,16 @@ export const WEEKDAY_TIERS: readonly Tier[] = [1, 1, 2, 2, 3, 3, 3];
 /** The tier for the UTC weekday of `date`. */
 export const tierForDate = (date: Date): Tier => WEEKDAY_TIERS[(date.getUTCDay() + 6) % 7] ?? 1;
 
+/**
+ * The weekday, Monday first and counted from 0, whose daily post is a puzzle
+ * made by a player when an approved one is waiting: 6 is Sunday. With none
+ * waiting, that day gets its generated puzzle as usual.
+ */
+export const COMMUNITY_WEEKDAY = 6;
+
+/** True when the UTC weekday of `date` is the community puzzle's day. */
+export const isCommunityDay = (date: Date): boolean => (date.getUTCDay() + 6) % 7 === COMMUNITY_WEEKDAY;
+
 export const TEST_PUZZLE: Puzzle = {
   id: 'proto-1',
   number: 0,

@@ -37,6 +37,12 @@
       </section>
     </header>
 
+    <!-- A slim line under the readout: who made the puzzle, and for a moderator, what waits for review. -->
+    <aside class="banner" id="banner" hidden>
+      <p class="banner-credit" id="banner-credit" hidden></p>
+      <button class="banner-review" id="review-open" type="button" hidden></button>
+    </aside>
+
     <aside class="viewing" id="viewing" aria-live="polite" hidden>
       <p class="viewing-owner" id="viewing-owner"></p>
       <p class="viewing-detail" id="viewing-detail"></p>
@@ -52,7 +58,14 @@
         <p id="notice-text">Loading puzzle&hellip;</p>
         <button id="retry" type="button" hidden>Retry</button>
       </div>
-      <button class="how" id="how-to-play" type="button" aria-label="How to play" title="How to play" hidden>?</button>
+      <button class="how" id="how-to-play" type="button" aria-label="Help" title="Help" hidden>?</button>
+      <button class="sound" id="sound-toggle" type="button" aria-label="Sound" aria-pressed="true" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" />
+          <path class="sound-waves" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.6 7.6 0 0 1 0 11" />
+          <path class="sound-cross" d="M15.5 9.5l5 5m0-5l-5 5" />
+        </svg>
+      </button>
     </main>
 
     <!-- One hint at a time, in its own row so it never covers the board. -->
@@ -62,6 +75,15 @@
         <button class="hint-action" id="hint-action" type="button" hidden></button>
       </div>
       <button class="hint-skip" id="hint-skip" type="button" hidden>Skip</button>
+    </aside>
+
+    <!-- Making a puzzle: what it still needs, and the way to send it or leave. -->
+    <aside class="maker" id="maker" hidden>
+      <ul class="maker-list" id="maker-list" aria-label="What the puzzle needs"></ul>
+      <div class="maker-actions">
+        <button id="maker-leave" type="button">Leave</button>
+        <button class="maker-send" id="maker-send" type="button" disabled>Send for review</button>
+      </div>
     </aside>
 
     <footer class="controls">
@@ -112,6 +134,7 @@
             <button class="card-button secondary" id="result-share" type="button" hidden>Share result</button>
             <button class="card-button secondary" id="result-close" type="button">Back to the board</button>
           </div>
+          <button class="card-button quiet" id="result-make" type="button">Make a puzzle</button>
         </div>
       </section>
     </div>
@@ -127,6 +150,76 @@
         <button class="result-retry" id="gallery-retry" type="button" hidden>Retry</button>
         <ul class="result-list gallery-list" id="gallery-list" aria-label="Sculptures"></ul>
         <button class="card-button secondary" id="gallery-close" type="button">Back to results</button>
+      </section>
+    </div>
+
+    <!-- Help: the warm-up again, or making a puzzle. -->
+    <div class="result-layer" id="help-layer" hidden>
+      <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <h2 class="result-title" id="help-title">Help</h2>
+        <div class="card-actions">
+          <button class="card-button" id="help-how" type="button">How to play</button>
+          <button class="card-button secondary" id="help-make" type="button">Make a puzzle</button>
+          <button class="card-button secondary" id="help-close" type="button">Back to the board</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Making a puzzle: choose a board, or be told why not yet. -->
+    <div class="result-layer" id="make-layer" hidden>
+      <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="make-title">
+        <h2 class="result-title" id="make-title">Make a puzzle</h2>
+        <p class="card-text" id="make-text"></p>
+        <div class="card-actions">
+          <div class="card-row" id="make-boards">
+            <button class="card-button" id="make-4" type="button"></button>
+            <button class="card-button" id="make-5" type="button"></button>
+          </div>
+          <button class="card-button secondary" id="make-close" type="button">Not now</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Sending a puzzle: asked first, then told what happened. -->
+    <div class="result-layer" id="send-layer" hidden>
+      <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="send-title">
+        <h2 class="result-title" id="send-title">Send for review</h2>
+        <p class="card-text" id="send-text" role="status"></p>
+        <div class="card-actions">
+          <button class="card-button" id="send-confirm" type="button">Send for review</button>
+          <button class="card-button secondary" id="send-close" type="button">Keep building</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Moderators only: one waiting puzzle at a time. -->
+    <div class="result-layer" id="review-layer" hidden>
+      <section class="result-card" role="dialog" aria-modal="true" aria-labelledby="review-title">
+        <h2 class="result-title" id="review-title">Review</h2>
+        <p class="result-status" id="review-status" role="status"></p>
+        <div class="review-body" id="review-body" hidden>
+          <p class="result-line" id="review-waiting"></p>
+          <div class="review-panels">
+            <figure class="review-panel front">
+              <figcaption>Front</figcaption>
+              <canvas id="review-front" aria-hidden="true"></canvas>
+            </figure>
+            <figure class="review-panel side">
+              <figcaption>Side</figcaption>
+              <canvas id="review-side" aria-hidden="true"></canvas>
+            </figure>
+          </div>
+          <p class="result-blocks" id="review-size"></p>
+          <p class="result-rank" id="review-maker"></p>
+        </div>
+        <div class="card-actions">
+          <div class="card-row" id="review-decide">
+            <button class="card-button" id="review-approve" type="button">Approve</button>
+            <button class="card-button secondary" id="review-reject" type="button">Reject</button>
+          </div>
+          <button class="card-button secondary" id="review-try" type="button">Try it on the board</button>
+          <button class="card-button secondary" id="review-close" type="button">Back to the board</button>
+        </div>
       </section>
     </div>
 

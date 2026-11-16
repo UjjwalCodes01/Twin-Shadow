@@ -5,6 +5,7 @@ import type {
   GalleryResponse,
   JoinResponse,
   OnboardingResponse,
+  PrefsRequest,
   PuzzleResponse,
   ResultResponse,
   ShareResponse,
@@ -12,13 +13,29 @@ import type {
   SubmitRejection,
   SubmitResponse,
 } from '../../shared/api';
-import { isGallerySort, parseJoinRequest, parseOnboardingRequest, parseSubmitRequest } from '../../shared/api';
+import {
+  isGallerySort,
+  parseJoinRequest,
+  parseOnboardingRequest,
+  parsePrefsRequest,
+  parseSubmitRequest,
+} from '../../shared/api';
+import { makerStatus, pendingCount } from '../core/community';
 import { isSolved } from '../../shared/logic';
 import { isDevSubreddit } from '../core/dev';
 import { loadPost, type PostRecord } from '../core/posts';
 import { QUEUE, puzzleByNumber } from '../core/queue';
+import { callerIsModerator } from '../core/moderators';
 import { BRAND_NEW, getOnboarding, recordOnboarding } from '../core/onboarding';
-import { acceptSubmission, buildGallery, buildResult, currentStreak, solverCount } from '../core/scores';
+import { isMuted, setMuted } from '../core/prefs';
+import {
+  acceptSubmission,
+  buildGallery,
+  buildMakerResult,
+  buildResult,
+  currentStreak,
+  solverCount,
+} from '../core/scores';
 import { answerJoinPrompt, shareResult } from '../core/share';
 import { getStored, getSubmission } from '../core/submissions';
 
@@ -26,6 +43,10 @@ import { getStored, getSubmission } from '../core/submissions';
 export const api = new Hono();
 
 const NO_PUZZLE = 'This post has no puzzle.';
+
+/** Whether a player made the puzzle of a post. A maker sees its results but is never ranked on it. */
+const isMaker = (post: PostRecord, userId: string | undefined): boolean =>
+  userId !== undefined && post.maker?.userId === userId;
 
 /** The saved record of the post this request comes from, with its own puzzle copy. */
 const currentPost = async (): Promise<{ postId: string; post: PostRecord } | null> => {
@@ -41,7 +62,7 @@ api.get('/puzzle', async (c) => {
   const { userId, subredditName } = context;
   const current = await currentPost();
   if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
-  const { puzzle } = current.post;
+  const { puzzle, maker } = current.post;
   return c.json<PuzzleResponse>({
     puzzle,
     canSubmit: userId !== undefined,
@@ -50,6 +71,16 @@ api.get('/puzzle', async (c) => {
     debug: isDevSubreddit(subredditName),
     // A logged-out visitor has no record, so counts as new; the client remembers for them.
     onboarding: userId ? await getOnboarding(userId) : BRAND_NEW,
+    post: current.post.number,
+    // The only credit a community puzzle carries: its maker's username.
+    maker: maker?.username ?? null,
+    yours: isMaker(current.post, userId),
+    community: {
+      ...(await makerStatus(userId, Date.now())),
+      // The count is for moderators only; everyone else gets null.
+      review: (await callerIsModerator()) ? await pendingCount() : null,
+    },
+    muted: userId ? await isMuted(userId) : false,
   });
 });
 
@@ -73,7 +104,19 @@ api.get('/splash', async (c) => {
     played: own ? { blocks: own.blocks, par: own.par, stars: own.stars } : null,
     streak: userId ? await currentStreak(userId) : null,
     solvers: await solverCount(postId),
+    maker: post.maker?.username ?? null,
   });
+});
+
+// Remembers whether a player has turned sound off, so it follows them to another device.
+api.post('/prefs', async (c) => {
+  const { userId } = context;
+  if (!userId) return c.json({ status: 'failed', message: 'Log in to be remembered.' }, 401);
+  const body: unknown = await c.req.json().catch(() => null);
+  const request: PrefsRequest | null = parsePrefsRequest(body);
+  if (!request) return c.json({ status: 'failed', message: 'That could not be read.' }, 400);
+  await setMuted(userId, request.muted);
+  return c.json({ status: 'ok' });
 });
 
 // Remembers that a first-time player has finished or skipped the warm-up, or
@@ -88,11 +131,12 @@ api.post('/onboarding', async (c) => {
   return c.json<OnboardingResponse>({ status: 'ok' });
 });
 
-const REJECTIONS: Record<SubmitRejection, { status: 400 | 401 | 404 | 422; message: string }> = {
+const REJECTIONS: Record<SubmitRejection, { status: 400 | 401 | 403 | 404 | 422; message: string }> = {
   'no-puzzle': { status: 404, message: NO_PUZZLE },
   'logged-out': { status: 401, message: 'Log in to submit your solution.' },
   'malformed': { status: 400, message: 'That submission could not be read.' },
   'not-solved': { status: 422, message: 'That sculpture does not solve the puzzle.' },
+  'own-puzzle': { status: 403, message: 'You made this puzzle, so you are not ranked on it.' },
 };
 
 api.post('/submit', async (c) => {
@@ -106,6 +150,8 @@ api.post('/submit', async (c) => {
   if (!current) return reject('no-puzzle');
   if (!userId) return reject('logged-out');
   const { postId, post } = current;
+  // The maker knows the answer: they can look, but never take a place on the board.
+  if (isMaker(post, userId)) return reject('own-puzzle');
 
   const body: unknown = await c.req.json().catch(() => null);
   const request = parseSubmitRequest(body, post.puzzle.size);
@@ -138,6 +184,10 @@ api.get('/result', async (c) => {
   const { userId } = context;
   const current = await currentPost();
   if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
+  // The puzzle's maker sees how players are doing without having submitted, and with no place of their own.
+  if (isMaker(current.post, userId)) {
+    return c.json<ResultResponse>({ status: 'maker', result: await buildMakerResult(current.post, current.postId) });
+  }
   const stored = userId ? await getStored(current.postId, userId) : null;
   if (!stored) return c.json<ResultResponse>(NOT_SUBMITTED, 403);
   return c.json<ResultResponse>({ status: 'ok', result: await buildResult(current.post, stored) });
@@ -150,9 +200,15 @@ api.get('/gallery', async (c) => {
   const current = await currentPost();
   if (!current) return c.json({ status: 'error', message: NO_PUZZLE }, 404);
   const stored = userId ? await getStored(current.postId, userId) : null;
-  if (!stored) return c.json<GalleryResponse>(NOT_SUBMITTED, 403);
+  // The maker already knows an answer, so the others' are no secret from them.
+  if (!stored && !isMaker(current.post, userId)) return c.json<GalleryResponse>(NOT_SUBMITTED, 403);
   const sort = c.req.query('sort');
-  const gallery = await buildGallery(stored, isGallerySort(sort) ? sort : 'rarest', Number(c.req.query('page')));
+  const gallery = await buildGallery(
+    current.postId,
+    stored,
+    isGallerySort(sort) ? sort : 'rarest',
+    Number(c.req.query('page'))
+  );
   return c.json<GalleryResponse>({ status: 'ok', gallery });
 });
 

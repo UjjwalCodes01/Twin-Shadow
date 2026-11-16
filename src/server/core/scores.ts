@@ -3,8 +3,9 @@
 
 import { createHash } from 'node:crypto';
 import { redis } from '@devvit/web/server';
-import type { Gallery, GalleryEntry, GallerySort, LeaderboardRow, Result } from '../../shared/api';
+import type { Gallery, GalleryEntry, GallerySort, LeaderboardRow, MakerResult, Result } from '../../shared/api';
 import { starsFor } from '../../shared/score';
+import { markDailySolver } from './community';
 import { flairMilestone, setStreakFlair } from './flair';
 import { KEYS } from './keys';
 import { newestDaily, type PostRecord } from './posts';
@@ -71,7 +72,7 @@ const updateStreak = async (userId: string, username: string, daily: number | nu
   if (daily === null || daily !== (await newestDaily())) return;
   const streak = await readStreak(userId);
   if (streak.last === daily) return;
-  const current = streak.last === daily - 1 ? streak.current + 1 : 1;
+  const current = (await aliveAt(userId, streak.last, daily)) ? streak.current + 1 : 1;
   const next: Streak = { ...streak, current, best: Math.max(streak.best, current), last: daily };
   await writeStreak(userId, next);
 
@@ -84,18 +85,34 @@ const updateStreak = async (userId: string, username: string, daily: number | nu
 };
 
 /**
+ * Whether a streak whose last counted daily post is `last` is still unbroken
+ * when the daily post `daily` comes to be played or looked at. It is when
+ * nothing was missed in between, and also when the only day missed was one
+ * whose puzzle this player made: a maker cannot submit their own puzzle, so
+ * that day is carried over instead of counted against them.
+ */
+const aliveAt = async (userId: string, last: number, daily: number): Promise<boolean> => {
+  if (last >= daily - 1) return true;
+  if (last !== daily - 2) return false;
+  return (await redis.hGet(KEYS.dailyMakers, String(daily - 1))) === userId;
+};
+
+/**
  * The streak as shown. The newest daily post is still open, so having solved
  * it or the one before keeps the streak alive; missing the one before, which
- * is the latest finished post, shows zero.
+ * is the latest finished post, shows zero. A day whose puzzle the player made
+ * does not count as missed.
  */
-const shownStreak = (streak: Streak, newest: number): Result['streak'] => ({
-  current: streak.last >= newest - 1 ? streak.current : 0,
-  best: streak.best,
-});
+const shownStreak = async (userId: string, streak: Streak, newest: number): Promise<Result['streak']> => {
+  const madeNewest = (await redis.hGet(KEYS.dailyMakers, String(newest))) === userId;
+  // Their own puzzle is the newest: the day before it is the one that matters.
+  const alive = await aliveAt(userId, streak.last, madeNewest ? newest - 1 : newest);
+  return { current: alive ? streak.current : 0, best: streak.best };
+};
 
 /** A player's streak of daily puzzles as it stands now: 0 once the latest finished one was missed. */
 export const currentStreak = async (userId: string): Promise<number> =>
-  shownStreak(await readStreak(userId), await newestDaily()).current;
+  (await shownStreak(userId, await readStreak(userId), await newestDaily())).current;
 
 /** How many players have submitted a solution for a post. */
 export const solverCount = (postId: string): Promise<number> => redis.hLen(KEYS.submissions(postId));
@@ -167,6 +184,8 @@ export const acceptSubmission = async (
   if (outcome.status === 'accepted') {
     await countSolve(outcome.stored);
     await updateStreak(player.userId, player.username, post.daily);
+    // Having submitted a daily puzzle is what lets a player make one.
+    if (post.kind === 'daily') await markDailySolver(player.userId);
   }
   return outcome;
 };
@@ -223,10 +242,44 @@ export const buildResult = async (post: PostRecord, stored: StoredSubmission): P
     own,
     record: { blocks: fewest, underPar: fewest < par },
     rarity: { same, share: Math.min(same / solvers, 1), smallSample: solvers < MIN_RARITY_SAMPLE },
-    streak: shownStreak(await readStreak(userId), await newestDaily()),
+    streak: await shownStreak(userId, await readStreak(userId), await newestDaily()),
     // A share still being posted counts: the button must not offer a second one.
     shared: (await redis.hGet(KEYS.shares(postId), userId)) !== undefined,
     joinPrompt: (await redis.hGet(KEYS.joinPrompt, userId)) === undefined,
+  };
+};
+
+/**
+ * What the maker of a post's puzzle sees of its results: the same leaderboard
+ * and record as anyone, with no place of their own. Only call this for the maker.
+ */
+export const buildMakerResult = async (post: PostRecord, postId: string): Promise<MakerResult> => {
+  const { par } = post.puzzle;
+  const tallies = Object.entries(await redis.hGetAll(KEYS.blockCounts(postId)))
+    .map(([count, players]) => ({ blocks: Number(count), players: Number(players) }))
+    .filter((tally) => Number.isInteger(tally.blocks) && tally.players > 0);
+  const rankOf = (count: number): number =>
+    1 + tallies.reduce((fewer, tally) => fewer + (tally.blocks < count ? tally.players : 0), 0);
+  const fewest = tallies.length > 0 ? Math.min(...tallies.map((tally) => tally.blocks)) : null;
+
+  const top = await redis.zRange(KEYS.leaderboard(postId), 0, LEADERBOARD_ROWS - 1, { by: 'rank' });
+  const records =
+    top.length > 0
+      ? await redis.hMGet(
+          KEYS.submissions(postId),
+          top.map((entry) => entry.member)
+        )
+      : [];
+  const leaderboard: LeaderboardRow[] = top.map((entry, index) => {
+    const blocks = blocksFromScore(entry.score);
+    // Only the name is taken from a player's record, never the sculpture.
+    return { rank: rankOf(blocks), username: parseStored(records[index])?.username ?? 'unknown', blocks, you: false };
+  });
+  return {
+    par,
+    solvers: await solverCount(postId),
+    leaderboard,
+    record: fewest === null ? null : { blocks: fewest, underPar: fewest < par },
   };
 };
 
@@ -242,16 +295,17 @@ const parseSaved = (json: string | null | undefined): SavedSculpture | null => {
 
 /**
  * One page of the distinct sculptures submitted for a post. Only call this
- * for a player who has submitted; `stored` must be the caller's own record.
+ * for a player who has submitted, with their own record as `stored`, or for
+ * the puzzle's maker, who has none and passes null.
  */
 export const buildGallery = async (
-  stored: StoredSubmission,
+  postId: string,
+  stored: StoredSubmission | null,
   sort: GallerySort,
   requestedPage: number
 ): Promise<Gallery> => {
-  await ensureCounted(stored);
-  const { postId } = stored;
-  const ownHash = sculptureHash(stored.sculpture);
+  if (stored) await ensureCounted(stored);
+  const ownHash = stored ? sculptureHash(stored.sculpture) : null;
 
   // Block count, hash and builders for every distinct sculpture, in one read.
   const all = Object.entries(await redis.hGetAll(KEYS.sculptures(postId)))

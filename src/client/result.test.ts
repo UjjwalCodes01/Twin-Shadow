@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   blockText,
   canShare,
+  isMakerResult,
+  makerSolversText,
   ordinal,
   rankText,
   rarityText,
@@ -118,5 +120,34 @@ describe('wholeRowsEnding', () => {
 
   it('copes with an empty list', () => {
     expect(wholeRowsEnding([], 0, 100)).toEqual({ first: 0, height: 0 });
+  });
+});
+
+describe('the maker`s view', () => {
+  it('counts the players who have solved the puzzle', () => {
+    expect(makerSolversText(0)).toBe('Nobody has solved it yet');
+    expect(makerSolversText(1)).toBe('1 player has solved it');
+    expect(makerSolversText(40)).toBe('40 players have solved it');
+  });
+
+  it('is told apart from a player`s own result by having no rank', () => {
+    expect(isMakerResult({ par: 7, solvers: 2, leaderboard: [], record: null })).toBe(true);
+    expect(
+      isMakerResult({
+        blocks: 9,
+        par: 7,
+        stars: 2,
+        rank: 3,
+        tied: 1,
+        solvers: 40,
+        leaderboard: [],
+        own: null,
+        record: { blocks: 7, underPar: false },
+        rarity: { same: 1, share: 0.1, smallSample: false },
+        streak: { current: 1, best: 1 },
+        shared: false,
+        joinPrompt: false,
+      })
+    ).toBe(false);
   });
 });

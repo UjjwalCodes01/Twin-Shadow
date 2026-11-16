@@ -98,4 +98,52 @@ export const KEYS = {
    * first-solve hint has been seen. A player with no field is brand new.
    */
   onboarding: 'onboarding',
+
+  /** Hash, user id -> JSON: a player's settings. So far, whether sound is off. */
+  prefs: 'prefs',
+
+  /**
+   * Hash, user id -> '1': every player who has submitted a solution to a
+   * daily post. Only they may make a puzzle.
+   */
+  dailySolvers: 'daily-solvers',
+
+  /** String, a whole number: how many puzzles players have sent. Gives each its id, "cp-N". */
+  communityCounter: 'community:created',
+
+  /**
+   * Hash, puzzle id -> JSON: every puzzle a player has sent that waits for a
+   * moderator. Holds the two silhouettes, par, the maker, when it was sent,
+   * and the maker's own sculpture, which is private and never sent to a client.
+   */
+  communityPending: 'community:pending',
+
+  /** Sorted set, member puzzle id, score the time it was sent: the pending puzzles, oldest first. */
+  communityPendingOrder: 'community:pending:order',
+
+  /** Hash, user id -> puzzle id: the one puzzle each maker has waiting. A field here means their slot is taken. */
+  communityPendingByMaker: 'community:pending:by-maker',
+
+  /** Hash, puzzle id -> JSON: approved puzzles not yet used for a post. Same record as a pending one. */
+  communityApproved: 'community:approved',
+
+  /** Sorted set, member puzzle id, score the time it was approved: the community queue, oldest first. */
+  communityApprovedOrder: 'community:approved:order',
+
+  /**
+   * Hash, a puzzle's lookalike key -> puzzle id: every community puzzle that
+   * is pending, approved or already used, so the same one (or its mirror, or
+   * its two shadows swapped) is not accepted twice. A rejected puzzle's key is removed.
+   */
+  communityKeys: 'community:keys',
+
+  /** Hash, user id -> JSON list of times: when each maker sent a puzzle in the last seven days. */
+  communitySent: 'community:sent',
+
+  /**
+   * Hash, a daily post's place in the daily sequence -> the user id of the
+   * player who made its puzzle. The maker cannot submit that day, so their
+   * streak is carried across it instead of broken.
+   */
+  dailyMakers: 'community:daily-makers',
 } as const;

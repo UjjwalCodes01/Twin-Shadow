@@ -19,6 +19,12 @@ export type GameState = {
    * edited then; only rotating works.
    */
   viewing: boolean;
+  /**
+   * True while the player is making a puzzle of their own. The board is a
+   * fresh, empty one of the size they chose, and their own board is set
+   * aside until they leave.
+   */
+  making: boolean;
 };
 
 export type Listener = (state: GameState) => void;
@@ -43,18 +49,30 @@ export type Store = {
   view: (blocks: Iterable<string>) => void;
   /** Leaves viewing mode and puts the player's own board back exactly as it was. */
   endView: () => void;
+  /**
+   * Starts a puzzle of the player's own on an empty board of `size`. Their
+   * board, its undo stack and how far it was turned are set aside.
+   */
+  make: (size: Size) => void;
+  /** Leaves maker mode and puts the player's own board back exactly as it was, undo stack included. */
+  endMake: () => void;
 };
 
-export const createStore = (size: Size, initialBlocks: Iterable<string> = []): Store => {
+export const createStore = (ownSize: Size, initialBlocks: Iterable<string> = []): Store => {
+  // The board blocks are placed on: the puzzle's own, or the one chosen for a puzzle being made.
+  let size = ownSize;
   let state: GameState = {
     blocks: new Set(initialBlocks),
     rotation: 0,
     mode: 'add',
     undoStack: [],
     viewing: false,
+    making: false,
   };
   // The player's own board, set aside while they look at someone else's.
   let own: Pick<GameState, 'blocks' | 'undoStack'> | null = null;
+  // And set aside, with how it was turned and the mode in use, while they make a puzzle.
+  let beforeMaking: Pick<GameState, 'blocks' | 'undoStack' | 'rotation' | 'mode'> | null = null;
   const listeners = new Set<Listener>();
 
   const update = (changes: Partial<GameState>): void => {
@@ -106,6 +124,21 @@ export const createStore = (size: Size, initialBlocks: Iterable<string> = []): S
       const { blocks, undoStack } = own;
       own = null;
       update({ blocks, undoStack, viewing: false });
+    },
+    make: (makerSize) => {
+      // Not from someone else's sculpture, and not twice.
+      if (state.viewing || beforeMaking) return;
+      const { blocks, undoStack, rotation, mode } = state;
+      beforeMaking = { blocks, undoStack, rotation, mode };
+      size = makerSize;
+      update({ blocks: new Set(), undoStack: [], rotation: 0, mode: 'add', making: true });
+    },
+    endMake: () => {
+      if (!beforeMaking) return;
+      const kept = beforeMaking;
+      beforeMaking = null;
+      size = ownSize;
+      update({ ...kept, making: false });
     },
   };
 };

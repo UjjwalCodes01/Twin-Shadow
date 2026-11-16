@@ -68,6 +68,7 @@ describe('createNextPost', () => {
       daily: null,
       date: '2026-11-30',
       puzzle: puzzlesOfTier(1)[0],
+      maker: null,
     });
     expect(saved).not.toHaveProperty('puzzle.parIsOptimal');
     expect(await loadPost(created.postId)).toEqual(saved);

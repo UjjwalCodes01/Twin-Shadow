@@ -10,13 +10,17 @@ import {
   type Gallery,
   type GallerySort,
   type JoinChoice,
+  type MakerResult,
   type Onboarding,
   type OnboardingEvent,
   type Result,
+  type ReviewPuzzle,
   type Submission,
 } from '../shared/api';
+import { boardFor, type CommunityBoard } from '../shared/community';
 import { diffShadow, isSolved, parseSilhouette, projectFront, projectSide } from '../shared/logic';
 import { TEST_PUZZLE, TEST_SOLUTION, type Puzzle } from '../shared/puzzle';
+import { createCommunityUi } from './communityUi';
 import { DEBUG_STATES, debugSetup } from './debug';
 import { createGallery, type GalleryHandle } from './gallery';
 import { createHintBar } from './hintBar';
@@ -24,11 +28,13 @@ import { createHints, HINT_TEXT, SOLVE_HINT_TEXT, WARMUP_DONE_LABEL } from './hi
 import { createHud, type SubmitOutcome } from './hud';
 import { attachInput } from './input';
 import { journeys, NO_JOURNEY } from './journey';
-import { setMotionClock } from './motion';
+import { makerBoard } from './maker';
+import { prefersReducedMotion, setMotionClock } from './motion';
 import { createResultCard, type ActionOutcome, type ResultCard } from './result';
 import { createScene, type SceneHandle } from './scene';
+import { createSounds, soundForChange, type BoardMoment } from './sound';
 import { createStore, type Store } from './store';
-import { applyTheme } from './theme';
+import { applyTheme, THEME } from './theme';
 import { afterEvent, needsSolveHint, needsWarmup, readRemembered, remember } from './warmup';
 
 const PUZZLE_URL = '/api/puzzle';
@@ -37,6 +43,7 @@ const RESULT_URL = '/api/result';
 const GALLERY_URL = '/api/gallery';
 const SHARE_URL = '/api/share';
 const JOIN_URL = '/api/join';
+const PREFS_URL = '/api/prefs';
 
 /** 'missing' is a post with no puzzle saved for it: asking again cannot help, so there is no Retry. */
 type LoadState = 'loading' | 'ready' | 'error' | 'missing';
@@ -56,10 +63,19 @@ type GameOptions = {
   results?: boolean;
   /** True for the warm-up: the test puzzle with hints, never submitted or scored. */
   warmup?: boolean;
+  /** A store to build the game on, in place of a new one: the player's own, kept through maker mode. */
+  store?: Store;
+  /** The board a puzzle is being made on. Nothing to match, nothing scored. */
+  maker?: CommunityBoard;
+  /** True when the player made this puzzle: they can see its results, but cannot submit. */
+  own?: boolean;
 };
 
 /** Said under the count during the warm-up, where Submit would be. */
 const WARMUP_NOTE = 'Warm-up: nothing here is scored';
+const MAKER_NOTE = 'Making a puzzle: nothing here is scored';
+const OWN_NOTE = 'Your puzzle: you are not ranked on it';
+const TRIAL_NOTE = 'Trying a puzzle: nothing here is scored';
 
 const element = (id: string): HTMLElement => {
   const found = document.getElementById(id);
@@ -114,13 +130,13 @@ const submitSculpture = async (blocks: string[]): Promise<SubmitOutcome> => {
  * Fetches the caller's result for this post. The server only answers a player
  * who has submitted. Any failure becomes null, and the card offers a retry.
  */
-const loadResult = async (): Promise<Result | null> => {
+const loadResult = async (): Promise<Result | MakerResult | null> => {
   try {
     const response = await fetch(RESULT_URL);
     const body: unknown = await response.json();
     const parsed = parseResultResponse(body);
     if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
-    if (parsed.status !== 'ok') throw new Error(parsed.message);
+    if (parsed.status === 'not-submitted') throw new Error(parsed.message);
     return parsed.result;
   } catch (error) {
     console.error(`Could not load ${RESULT_URL}:`, error);
@@ -211,28 +227,170 @@ let onboarding: Onboarding | null = null;
 let remembered = readRemembered();
 /** The day's puzzle and how to start it: kept while the warm-up is on the board, to come back to. */
 let day: { puzzle: Puzzle; options: GameOptions } | null = null;
+/** The day's post number and, for a puzzle a player made, the maker's username. */
+let dayCredit: { post: number; maker: string | null } | null = null;
 
 const rememberEvent = (event: OnboardingEvent): void => {
   remembered = afterEvent(remembered, event);
   remember(event);
 };
 
+/** True while the board holds the day's own puzzle, and not the warm-up, a puzzle being made or a debug state. */
+let onDay = false;
+/** The store of the day's puzzle while it is on the board: maker mode borrows it and gives it back. */
+let dayStore: Store | null = null;
+
+/** Keeps the day's board exactly as it stands, to come back to after something else has had the board. */
+const keepDayBoard = (): void => {
+  if (!game || !day || !onDay) return;
+  // Someone else's sculpture is not the player's board: go back to their own first.
+  game.store.endView();
+  const { blocks, rotation } = game.store.getState();
+  day.options = { ...day.options, blocks: [...blocks], rotation };
+};
+
+/** Puts the day's puzzle back on the board as it was left. */
+const backToDay = (): void => {
+  if (day) startGame(day.puzzle, day.options);
+};
+
 /** Puts the warm-up on the board. The day's board is kept exactly as it stands. */
 const startWarmup = (): void => {
-  if (game && day) {
-    const { blocks, rotation } = game.store.getState();
-    day.options = { ...day.options, blocks: [...blocks], rotation };
-  }
+  keepDayBoard();
   startGame(TEST_PUZZLE, { warmup: true, submitBlocked: WARMUP_NOTE });
 };
 
 /** Ends the warm-up, remembers how, and goes on (or back) to the day's puzzle. */
 const endWarmup = (event: 'warmup-finished' | 'warmup-skipped'): void => {
   rememberEvent(event);
-  if (day) startGame(day.puzzle, day.options);
+  backToDay();
 };
 
-howButton.addEventListener('click', startWarmup);
+// --- Making and reviewing puzzles -----------------------------------------------
+
+/**
+ * Starts a puzzle of the player's own on an empty board. Their own board is
+ * set aside inside its store, undo stack and all, and comes back when they leave.
+ */
+const startMaking = (board: CommunityBoard): void => {
+  if (!game || !onDay) return;
+  const store = game.store;
+  store.endView();
+  store.make(board.size);
+  dayStore = store;
+  startGame(makerBoard(board), { maker: board, store, submitBlocked: MAKER_NOTE });
+};
+
+/** Leaves maker mode: the player's own board is back exactly as they left it. */
+const stopMaking = (): void => {
+  if (!dayStore || !day) return;
+  dayStore.endMake();
+  startGame(day.puzzle, { ...day.options, store: dayStore });
+};
+
+/** Puts a puzzle that waits for review on the board, for a moderator to try. Nothing about it is submitted. */
+const tryPuzzle = (waiting: ReviewPuzzle): void => {
+  keepDayBoard();
+  const puzzle: Puzzle = {
+    id: waiting.id,
+    number: 0,
+    tier: boardFor(waiting.size)?.tier ?? 1,
+    size: waiting.size,
+    front: waiting.front,
+    side: waiting.side,
+    par: waiting.par,
+  };
+  startGame(puzzle, { submitBlocked: TRIAL_NOTE });
+  hintBar.open(null);
+  hintBar.show(`Trying the puzzle by u/${waiting.maker}.`, {
+    label: 'Back to review',
+    run: () => {
+      hintBar.close();
+      backToDay();
+      communityUi.openReview();
+    },
+  });
+};
+
+const communityUi = createCommunityUi({ howToPlay: startWarmup, startMaking, stopMaking, tryPuzzle });
+
+// "?" opens help: the warm-up again, or making a puzzle.
+howButton.addEventListener('click', communityUi.openHelp);
+
+// --- Sound ------------------------------------------------------------------------
+// Made in code, quiet, and only after the player's first tap. The mute button
+// is remembered on this device and, for a logged-in player, on the server.
+
+const MUTED_STORAGE_KEY = 'twin-shadows.muted';
+const sounds = createSounds();
+const soundButton = element('sound-toggle');
+/** How long after a block is placed it lands: when its knock is heard. Nothing drops with reduced motion. */
+const KNOCK_DELAY_MS = prefersReducedMotion() ? 0 : THEME.motion.drop.fallMs;
+
+const showSound = (): void => {
+  const on = !sounds.isMuted();
+  soundButton.setAttribute('aria-pressed', String(on));
+  soundButton.setAttribute('aria-label', on ? 'Sound is on. Turn it off' : 'Sound is off. Turn it on');
+};
+
+/** What this device remembers about sound, or null when it has never been set here. */
+const rememberedMute = (): boolean | null => {
+  try {
+    const saved = localStorage.getItem(MUTED_STORAGE_KEY);
+    return saved === null ? null : saved === 'true';
+  } catch {
+    return null;
+  }
+};
+
+const setMuted = (muted: boolean, remember: boolean): void => {
+  sounds.setMuted(muted);
+  showSound();
+  if (!remember) return;
+  try {
+    localStorage.setItem(MUTED_STORAGE_KEY, String(muted));
+  } catch {
+    // Storage is unavailable; the server may still remember.
+  }
+  // In the background: a logged-out visitor is refused, and the device has it anyway.
+  void fetch(PREFS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ muted }),
+  }).catch((error: unknown) => {
+    console.error(`Could not save the sound setting at ${PREFS_URL}:`, error);
+  });
+};
+
+soundButton.addEventListener('click', () => setMuted(!sounds.isMuted(), true));
+setMuted(rememberedMute() ?? false, false);
+// A browser lets sound start only from a touch, so it is set up on the first one.
+document.addEventListener('pointerdown', () => sounds.unlock(), { once: true, capture: true });
+
+/** Plays the board's sounds for one game. Returns a function that stops listening. */
+const runSounds = (puzzle: Puzzle, store: Store, free: boolean): (() => void) => {
+  const moment = (): BoardMoment => {
+    const { blocks, viewing, making } = store.getState();
+    return { blocks: blocks.size, viewing, making };
+  };
+  let before = moment();
+  let solvedBefore = !free && isSolved(store.getState().blocks, puzzle);
+  let solvedOnce = solvedBefore;
+  return store.subscribe((state) => {
+    const after = moment();
+    const sound = soundForChange(before, after);
+    before = after;
+    if (sound === 'knock') sounds.knock(KNOCK_DELAY_MS);
+    if (sound === 'lift') sounds.lift();
+    // Two notes the first time this sculpture becomes a valid solve, as its last block lands.
+    const solved = !free && !state.viewing && isSolved(state.blocks, puzzle);
+    if (solved && !solvedBefore && !solvedOnce) {
+      solvedOnce = true;
+      sounds.solved();
+    }
+    solvedBefore = solved;
+  });
+};
 
 /**
  * Runs the warm-up's hints for one game. Returns a function that stops them.
@@ -314,9 +472,18 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
   canvas.id = 'board';
   stage.append(canvas);
 
-  const store = createStore(puzzle.size, options.blocks ?? []);
-  if (options.rotation) store.rotate(options.rotation);
-  const scene = createScene(canvas, puzzle, store);
+  // Maker mode borrows the player's own store and gives it back; everything else starts a new one.
+  const store = options.store ?? createStore(puzzle.size, options.blocks ?? []);
+  if (!options.store && options.rotation) store.rotate(options.rotation);
+  const free = options.maker !== undefined;
+  onDay = options.results === true;
+  if (onDay) dayStore = store;
+  const scene = createScene(canvas, puzzle, store, { free });
+  // The credit for a puzzle a player made belongs to the day's puzzle, not to whatever else has the board.
+  communityUi.setCredit(dayCredit?.post ?? 0, onDay ? (dayCredit?.maker ?? null) : null);
+  const stopSounds = runSounds(puzzle, store, free);
+  const stopMaker = options.maker ? communityUi.runMaker(store, options.maker) : (): void => {};
+  soundButton.hidden = false;
   // The result card and the gallery lead to each other, so each gets a way
   // to open the other. A debug puzzle has neither.
   let card: ResultCard | null = null;
@@ -337,6 +504,7 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
         journey.galleryOpened();
         gallery?.open();
       },
+      openMake: communityUi.openMake,
       share: async (tap) => {
         const outcome = await shareResult(tap);
         if (outcome === 'done') journey.resultShared();
@@ -368,11 +536,16 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
         // Submitted: any hint about submitting has done its work.
         stopHints();
         stopHints = (): void => {};
+        // Remembered with the day's puzzle, so coming back to it later shows it as submitted.
+        if (onDay && day) day.options = { ...day.options, submission: outcome.submission };
       }
       return outcome;
     },
     openResult: card ? () => card?.open() : null,
-    practice: options.warmup === true,
+    // Nothing to submit in the warm-up, on a puzzle being made, or on a puzzle the player made.
+    practice: options.warmup === true || free || options.own === true,
+    free,
+    resultsWithoutSubmission: options.own === true,
   });
   attachInput(canvas, puzzle, store, scene);
 
@@ -390,6 +563,8 @@ const startGame = (puzzle: Puzzle, options: GameOptions = {}): void => {
     stop: () => {
       journey.stop();
       stopHints();
+      stopSounds();
+      stopMaker();
       stopHow();
       howButton.hidden = true;
       removeHud();
@@ -526,18 +701,25 @@ async function loadPostPuzzle(): Promise<void> {
     if (!parsed) throw new Error('Response is not a valid puzzle');
     const { puzzle, submission, canSubmit, debug } = parsed;
     onboarding = parsed.onboarding;
+    dayCredit = { post: parsed.post, maker: parsed.maker };
+    communityUi.setStatus(parsed.community);
+    // This device's own setting wins; otherwise the server's, which follows a player between devices.
+    if (rememberedMute() === null) setMuted(parsed.muted, false);
     day = {
       puzzle,
       options: {
         // A returning player gets their submitted sculpture back on the board.
         blocks: submission?.sculpture ?? [],
         submission,
-        submitBlocked: canSubmit ? null : 'Log in to submit',
+        // The maker of this puzzle can look at its results but is never ranked on it.
+        submitBlocked: parsed.yours ? OWN_NOTE : canSubmit ? null : 'Log in to submit',
         results: true,
+        own: parsed.yours,
       },
     };
     // A player neither the server nor this device has seen before starts with the warm-up.
-    if (needsWarmup(parsed.onboarding, remembered, submission !== null)) startWarmup();
+    // Not the maker of this puzzle, who plainly knows how to play.
+    if (!parsed.yours && needsWarmup(parsed.onboarding, remembered, submission !== null)) startWarmup();
     else startGame(day.puzzle, day.options);
     if (debug) showDebugBar();
   } catch (error) {

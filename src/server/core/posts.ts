@@ -1,6 +1,7 @@
 import { reddit, redis } from '@devvit/web/server';
 import { parsePuzzle } from '../../shared/api';
-import { tierForDate, type Puzzle, type Tier } from '../../shared/puzzle';
+import { isCommunityDay, tierForDate, type Puzzle, type Tier } from '../../shared/puzzle';
+import { takeApproved, type Maker } from './community';
 import { KEYS } from './keys';
 import { puzzlesOfTier } from './queue';
 
@@ -28,6 +29,8 @@ export type PostRecord = {
   date: string;
   /** The post's own copy of its puzzle, id included. Never re-read from the queue. */
   puzzle: Puzzle;
+  /** The player who made the puzzle, or null for a generated one. */
+  maker: Maker | null;
 };
 
 export type CreatedPost = PostRecord & { postId: string };
@@ -63,11 +66,42 @@ export const createNextPost = async (kind: PostKind, now: Date = new Date()): Pr
   });
   // Chosen once Reddit has accepted the post, so a failed post uses up a
   // number but never a puzzle or a place in the daily sequence.
-  const puzzle = await nextPuzzleOfTier(tierForDate(now));
+  // On the community's day the daily post is the approved puzzle that has
+  // waited longest. With none waiting, it is the generated puzzle as usual.
+  const community = kind === 'daily' && isCommunityDay(now) ? await takeApproved() : null;
+  const puzzle = community ? community.puzzle : await nextPuzzleOfTier(tierForDate(now));
+  const maker = community ? community.maker : null;
   const daily = kind === 'daily' ? await redis.incrBy(KEYS.dailyCounter, 1) : null;
-  const record: PostRecord = { number, kind, daily, date: utcDate(now), puzzle };
+  const record: PostRecord = { number, kind, daily, date: utcDate(now), puzzle, maker };
   await redis.set(KEYS.post(post.id), JSON.stringify(record));
+  if (maker) {
+    // The maker cannot submit their own puzzle; this lets their streak carry across the day.
+    if (daily !== null) await redis.hSet(KEYS.dailyMakers, { [String(daily)]: maker.userId });
+    await creditMaker(post.id, maker.username);
+  }
   return { ...record, postId: post.id };
+};
+
+/** The comment that credits a puzzle's maker. Only their username: makers give no other text. */
+export const creditText = (username: string): string => `Today's puzzle was made by u/${username}.`;
+
+/**
+ * Adds one comment from the app's account crediting the maker, and pins it.
+ * A bonus: it never throws, so a failure here cannot undo the post.
+ */
+const creditMaker = async (postId: string, username: string): Promise<void> => {
+  try {
+    if (!postId.startsWith('t3_')) return;
+    const comment = await reddit.submitComment({ id: `t3_${postId.slice(3)}`, text: creditText(username) });
+    try {
+      // Distinguished as a moderator and stuck to the top of the comments.
+      await comment.distinguish(true);
+    } catch (error) {
+      console.warn(`Could not pin the credit comment on ${postId}: ${error}`);
+    }
+  } catch (error) {
+    console.error(`Could not credit ${username} on ${postId}: ${error}`);
+  }
 };
 
 /** The saved record of a post, or null for a post this app version did not create. */
@@ -84,7 +118,17 @@ export const loadPost = async (postId: string): Promise<PostRecord | null> => {
   if (typeof number !== 'number' || typeof date !== 'string' || !puzzle) return null;
   if (kind !== 'daily' && kind !== 'manual') return null;
   if (daily !== null && typeof daily !== 'number') return null;
-  return { number, kind, daily, date, puzzle };
+  return { number, kind, daily, date, puzzle, maker: parseMaker(value) };
+};
+
+/** The maker in a saved post record. A post from before community puzzles has none. */
+const parseMaker = (record: object): Maker | null => {
+  if (!('maker' in record)) return null;
+  const { maker } = record;
+  if (typeof maker !== 'object' || maker === null || !('userId' in maker) || !('username' in maker)) return null;
+  return typeof maker.userId === 'string' && typeof maker.username === 'string'
+    ? { userId: maker.userId, username: maker.username }
+    : null;
 };
 
 /** How many daily posts exist, which is also the `daily` value of the newest one. */

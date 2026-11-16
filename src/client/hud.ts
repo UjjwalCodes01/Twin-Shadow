@@ -34,6 +34,16 @@ export type HudOptions = {
   openResult: (() => void) | null;
   /** True for the warm-up: there is nothing to submit, so the button is not shown at all. */
   practice?: boolean;
+  /**
+   * True for a board with no shadows to match, as when a player is making a
+   * puzzle: the panels show the shadows cast, and there is no par and nothing to solve.
+   */
+  free?: boolean;
+  /**
+   * True when the results can be opened without a submission: the maker of
+   * this puzzle looking at how players are doing on it.
+   */
+  resultsWithoutSubmission?: boolean;
 };
 
 /** Longest side of a silhouette panel, in CSS px. */
@@ -113,8 +123,14 @@ const buildPanel = (id: string, kind: WallKind, columns: number, rows: number): 
  * it. New shadow fades in over `fadeMs`, as it does on the wall. Returns
  * whether anything was painted.
  */
-const paintPanel = (panel: Panel, states: CellState[][], depth: number, fadeMs: number): boolean => {
-  const solved = states.every((row) => row.every((state) => state === 'match' || state === 'empty'));
+const paintPanel = (
+  panel: Panel,
+  states: CellState[][],
+  depth: number,
+  fadeMs: number,
+  markSolved: boolean
+): boolean => {
+  const solved = markSolved && states.every((row) => row.every((state) => state === 'match' || state === 'empty'));
   panel.root.classList.toggle('solved', solved);
   const signature = `${depth}|${JSON.stringify(states)}`;
   if (!panel.fade || signature === panel.last) return false;
@@ -136,6 +152,10 @@ const paintPanel = (panel: Panel, states: CellState[][], depth: number, fadeMs: 
   );
   return true;
 };
+
+/** Every lit cell as plain shadow, with nothing wanted and so nothing wrong. */
+const asCast = (lit: readonly (readonly boolean[])[]): CellState[][] =>
+  lit.map((row) => row.map((cell): CellState => (cell ? 'match' : 'empty')));
 
 /** Wires the HUD to one game. Returns a function that unwires it again. */
 export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): (() => void) => {
@@ -258,8 +278,14 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     submitNote.textContent = note ?? '';
     submitNote.classList.toggle('failed', options.submitBlocked === null && failure !== null);
 
-    // Once submitted, a small button brings the result card back.
-    resultButton.hidden = submission === null || options.openResult === null;
+    // Once submitted, a small button brings the result card back. The maker
+    // of the puzzle has it from the start, with no stars of their own on it.
+    const asMaker = options.resultsWithoutSubmission === true && submission === null;
+    resultButton.hidden = (submission === null && !asMaker) || options.openResult === null;
+    if (asMaker) {
+      resultButton.replaceChildren('Results');
+      resultButton.removeAttribute('aria-label');
+    }
     if (submission) {
       resultButton.replaceChildren('Results ', starRow(submission.stars));
       resultButton.setAttribute(
@@ -271,7 +297,9 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
 
   const render = (state: GameState): void => {
     const { blocks, mode, undoStack, viewing } = state;
-    const solvedNow = isSolved(blocks, puzzle);
+    const free = options.free === true;
+    // With no shadows to match there is nothing to solve.
+    const solvedNow = !free && isSolved(blocks, puzzle);
     // The moment the sculpture first becomes a valid solve: both shadows
     // deepen, then ease back. Not when it was found solved, nor for someone else's.
     if (solvedNow && wasSolved === false && !viewing && !reduced) {
@@ -284,12 +312,21 @@ export const createHud = (puzzle: Puzzle, store: Store, options: HudOptions): ((
     }
     wasSolved = solvedNow;
     const depth = deep ? THEME.motion.solve.deepen : 1;
-    const front = paintPanel(frontPanel, diffShadow(projectFront(blocks, size), frontTarget), depth, shadowMs);
-    const side = paintPanel(sidePanel, diffShadow(projectSide(blocks, size), sideTarget), depth, shadowMs);
+    const frontCast = projectFront(blocks, size);
+    const sideCast = projectSide(blocks, size);
+    const front = paintPanel(
+      frontPanel,
+      free ? asCast(frontCast) : diffShadow(frontCast, frontTarget),
+      depth,
+      shadowMs,
+      !free
+    );
+    const side = paintPanel(sidePanel, free ? asCast(sideCast) : diffShadow(sideCast, sideTarget), depth, shadowMs, !free);
     if ((front || side) && panelFrame === 0) panelFrame = requestAnimationFrame(stepPanels);
 
     countBlocks.textContent = blockText(blocks.size);
-    countPar.textContent = `par ${puzzle.par}`;
+    // A puzzle being made has no par yet.
+    countPar.textContent = free ? '' : `par ${puzzle.par}`;
 
     const floating = findFloating(blocks).length;
     floatingWarning.hidden = floating === 0;

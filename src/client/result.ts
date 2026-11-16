@@ -1,7 +1,7 @@
 // The result card shown over the board after submitting. Plain HTML; the data
 // comes fresh from the server every time the card opens.
 
-import type { JoinChoice, LeaderboardRow, Result } from '../shared/api';
+import type { JoinChoice, LeaderboardRow, MakerResult, Result } from '../shared/api';
 import { rarityPercent } from '../shared/share';
 import { showStars } from './stars';
 
@@ -73,6 +73,23 @@ export const shareButtonText = (state: ShareState): string => SHARE_BUTTON_TEXT[
 /** The Share button can be tapped only when there is something left to do. */
 export const canShare = (state: ShareState): boolean => state === 'ready' || state === 'failed';
 
+// --- The maker's view of their own puzzle ---------------------------------------
+
+export const MAKER_TITLE = 'Your puzzle';
+export const SOLVED_TITLE = 'Solved';
+
+/** Said plainly on the card: the maker can look, and is never ranked. */
+export const MAKER_NOTE = 'You made this puzzle, so you are not ranked on it.';
+
+/** How the players are getting on with it. */
+export const makerSolversText = (solvers: number): string => {
+  if (solvers <= 0) return 'Nobody has solved it yet';
+  return solvers === 1 ? '1 player has solved it' : `${solvers} players have solved it`;
+};
+
+/** Whether a result is the maker's view of their puzzle: it has no rank, because a maker is never ranked. */
+export const isMakerResult = (result: Result | MakerResult): boolean => !('rank' in result);
+
 export const JOIN_PROMPT_TEXT = 'Join the community for daily puzzles.';
 export const JOIN_FAILED_TEXT = "Couldn't join. Try again.";
 
@@ -85,8 +102,13 @@ export const JOIN_FAILED_TEXT = "Couldn't join. Try again.";
 export type ActionOutcome = 'done' | 'declined' | 'failed';
 
 export type ResultCardOptions = {
-  /** Fetches the caller's result. Resolves to null when it cannot be had; never throws. */
-  load: () => Promise<Result | null>;
+  /**
+   * Fetches the caller's result, or for the maker of the puzzle their view of
+   * how players are doing. Resolves to null when it cannot be had; never throws.
+   */
+  load: () => Promise<Result | MakerResult | null>;
+  /** Opens the way to making a puzzle. It runs after the card has closed. */
+  openMake: () => void;
   /** The card's main next step. It runs after the card has closed. */
   openGallery: () => void;
   /** Posts the result as a comment. Gets the tap itself, which Reddit's permission check needs. Never throws. */
@@ -135,7 +157,7 @@ const rowItem = (row: LeaderboardRow): HTMLLIElement => {
 };
 
 /** Wires the result card to one game. */
-export const createResultCard = ({ load, openGallery, share, answerJoin }: ResultCardOptions): ResultCard => {
+export const createResultCard = ({ load, openGallery, openMake, share, answerJoin }: ResultCardOptions): ResultCard => {
   const layer = element('result-layer');
   const status = element('result-status');
   const body = element('result-body');
@@ -175,7 +197,38 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
     joinText.textContent = text;
   };
 
-  const show = (result: Result): void => {
+  const title = element('result-title');
+  const make = element('result-make');
+
+  /** The card for the maker of the puzzle: how players are doing, and no place of their own. */
+  const showAsMaker = (result: MakerResult): void => {
+    title.textContent = MAKER_TITLE;
+    stars.hidden = true;
+    underPar.hidden = true;
+    blocks.textContent = makerSolversText(result.solvers);
+    rank.textContent = `Par ${result.par}`;
+    rarity.textContent = MAKER_NOTE;
+    streak.hidden = true;
+    record.hidden = result.record === null;
+    if (result.record) record.textContent = recordText(result.record);
+    list.replaceChildren(...result.leaderboard.map(rowItem));
+    list.hidden = result.leaderboard.length === 0;
+    // Nothing of the maker's own to share, and no prompt to join.
+    shareButton.hidden = true;
+    joinBox.hidden = true;
+  };
+
+  const show = (result: Result | MakerResult): void => {
+    // A player's own result has a rank; the maker's view has none.
+    if (!('rank' in result)) {
+      showAsMaker(result);
+      return;
+    }
+    title.textContent = SOLVED_TITLE;
+    stars.hidden = false;
+    streak.hidden = false;
+    record.hidden = false;
+    list.hidden = false;
     showStars(stars, result.stars);
     blocks.textContent = `${blockText(result.blocks)} · par ${result.par}`;
     underPar.hidden = result.blocks >= result.par;
@@ -282,6 +335,14 @@ export const createResultCard = ({ load, openGallery, share, answerJoin }: Resul
     'resize',
     () => {
       if (!layer.hidden && !body.hidden) revealOwnRow();
+    },
+    { signal: listeners.signal }
+  );
+  make.addEventListener(
+    'click',
+    () => {
+      hide();
+      openMake();
     },
     { signal: listeners.signal }
   );

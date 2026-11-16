@@ -93,6 +93,7 @@ describe('POST /api/share', () => {
         text: `Twin Shadows #${target.number}: ${par} blocks, par ${par}, 3 stars. Among the first solvers.`,
         authorName: 'ann',
         runAs: 'USER',
+        pinned: false,
       },
     ]);
   });

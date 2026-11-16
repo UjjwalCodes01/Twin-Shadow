@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseSilhouette } from '../shared/logic';
-import { TEST_PUZZLE } from '../shared/puzzle';
+import { parseSilhouette } from './logic';
+import { TEST_PUZZLE } from './puzzle';
 import {
   canonicalKey,
   columnCounts,

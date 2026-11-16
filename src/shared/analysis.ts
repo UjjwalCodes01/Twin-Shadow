@@ -1,8 +1,8 @@
-// Measurements of a silhouette, used by the generator's quality filters.
+// Measurements of a silhouette, used by the quality checks on generated and player-made puzzles.
 // A silhouette here is a Grid from src/shared/logic.ts: indexed [y][column],
 // with y = 0 at the floor.
 
-import type { Grid } from '../shared/logic';
+import type { Grid } from './logic';
 
 export const countLit = (grid: Grid): number =>
   grid.reduce((total, row) => total + row.filter(Boolean).length, 0);

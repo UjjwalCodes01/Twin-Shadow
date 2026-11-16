@@ -180,3 +180,108 @@ describe('store', () => {
     });
   });
 });
+
+describe('maker mode', () => {
+  const FIVE = { w: 5, d: 5, h: 5 };
+
+  /** A board with some history: three blocks placed, one removed, turned once, in remove mode. */
+  const played = () => {
+    const store = createStore(TEST_PUZZLE.size);
+    store.add('0,0,0');
+    store.add('1,0,0');
+    store.add('2,0,0');
+    store.remove('1,0,0');
+    store.rotate(1);
+    store.setMode('remove');
+    return store;
+  };
+
+  it('starts on an empty board that can be built on freely', () => {
+    const store = played();
+    store.make(FIVE);
+    const state = store.getState();
+    expect(state.making).toBe(true);
+    expect([...state.blocks]).toEqual([]);
+    expect(state.undoStack).toEqual([]);
+    expect(state.rotation).toBe(0);
+    expect(state.mode).toBe('add');
+    expect(store.add('0,0,0')).toBe(true);
+  });
+
+  it('uses the board size chosen, not the puzzle`s', () => {
+    const store = played();
+    store.make(FIVE);
+    // Outside the 3x3x3 puzzle, inside a 5x5x5 board.
+    expect(store.add('4,0,4')).toBe(true);
+    expect(store.add('5,0,0')).toBe(false);
+    store.endMake();
+    // Back on the puzzle's own board, where that cell does not exist.
+    expect(store.add('4,0,4')).toBe(false);
+  });
+
+  it('restores the player`s board, undo stack, turn and mode exactly on leaving', () => {
+    const store = played();
+    const before = store.getState();
+    store.make(FIVE);
+    store.add('0,0,0');
+    store.add('0,1,0');
+    store.rotate(2);
+    store.undo();
+    store.endMake();
+
+    const after = store.getState();
+    expect(after.making).toBe(false);
+    expect(after.blocks).toBe(before.blocks);
+    expect(after.undoStack).toBe(before.undoStack);
+    expect(after.rotation).toBe(before.rotation);
+    expect(after.mode).toBe(before.mode);
+    // The undo stack works as if maker mode had never happened.
+    store.undo();
+    expect([...store.getState().blocks].sort()).toEqual(['0,0,0', '1,0,0', '2,0,0']);
+    store.undo();
+    expect([...store.getState().blocks].sort()).toEqual(['0,0,0', '1,0,0']);
+  });
+
+  it('keeps nothing of the puzzle being made once it is left', () => {
+    const store = played();
+    store.make(FIVE);
+    store.add('3,0,3');
+    store.endMake();
+    expect(store.getState().blocks.has('3,0,3')).toBe(false);
+    // Making again starts empty.
+    store.make(FIVE);
+    expect(store.getState().blocks.size).toBe(0);
+  });
+
+  it('tells listeners when it starts and ends', () => {
+    const store = played();
+    const seen: boolean[] = [];
+    store.subscribe((state) => seen.push(state.making));
+    store.make(FIVE);
+    store.endMake();
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('cannot be started twice, or from someone else`s sculpture', () => {
+    const store = played();
+    store.make(FIVE);
+    store.add('0,0,0');
+    store.make({ w: 4, d: 4, h: 4 });
+    expect(store.getState().blocks.size).toBe(1);
+    store.endMake();
+
+    const own = store.getState().blocks;
+    store.view(['2,2,2']);
+    store.make(FIVE);
+    expect(store.getState().making).toBe(false);
+    store.endView();
+    expect(store.getState().blocks).toBe(own);
+  });
+
+  it('does nothing when leaving without having started', () => {
+    const store = played();
+    const before = store.getState();
+    store.endMake();
+    expect(store.getState()).toBe(before);
+  });
+});

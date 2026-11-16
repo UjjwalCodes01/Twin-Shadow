@@ -27,7 +27,66 @@ export type PuzzleResponse = {
   debug: boolean;
   /** What a first-time player has still to be shown. Both true for a logged-out visitor. */
   onboarding: Onboarding;
+  /** The N in the post's title, "Twin Shadows #N". */
+  post: number;
+  /** The username of the player who made this puzzle, or null for a generated one. */
+  maker: string | null;
+  /** True when the caller made this puzzle: they can look at its results, but are never ranked on it. */
+  yours: boolean;
+  /** What the caller may do about puzzles made by players. */
+  community: CommunityStatus;
+  /** Whether the caller has turned sound off. False for a logged-out visitor, whose device remembers instead. */
+  muted: boolean;
 };
+
+/** What the caller may do about puzzles made by players. */
+export type CommunityStatus = {
+  /** Whether the caller may make and send a puzzle now. */
+  canMake: boolean;
+  /** Why not, in a sentence for the player, or null when they may. */
+  why: string | null;
+  /** For a moderator of this community: how many puzzles wait for review. Null for everyone else. */
+  review: number | null;
+};
+
+/** Body of POST /api/community/puzzles: the sculpture whose shadows become the puzzle. */
+export type MakePuzzleRequest = { size: Size; blocks: string[] };
+
+/**
+ * Response of POST /api/community/puzzles. `sent` carries the par the server
+ * worked out. `refused` carries which rule stopped it and a sentence saying so.
+ */
+export type MakePuzzleResponse =
+  | { status: 'sent'; par: number }
+  | { status: 'refused'; reason: string; message: string };
+
+/** A puzzle waiting for review, as a moderator sees it. Never the maker's own sculpture. */
+export type ReviewPuzzle = {
+  id: string;
+  size: Size;
+  front: string[];
+  side: string[];
+  par: number;
+  /** The maker's username: the only credit a puzzle carries. */
+  maker: string;
+};
+
+export const REVIEW_DECISIONS = ['approve', 'reject'] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+/** Body of POST /api/community/review. */
+export type ReviewRequest = { id: string; decision: ReviewDecision };
+
+/**
+ * Response of GET and POST /api/community/review: how many puzzles wait, and
+ * the oldest of them, or null when none do. `refused` for anyone but a moderator.
+ */
+export type ReviewResponse =
+  | { status: 'ok'; waiting: number; puzzle: ReviewPuzzle | null }
+  | { status: 'refused'; message: string };
+
+/** Body of POST /api/prefs. */
+export type PrefsRequest = { muted: boolean };
 
 /** What a player has still to be shown the first time: each is true until it has happened. */
 export type Onboarding = {
@@ -66,12 +125,14 @@ export type SplashResponse = {
   streak: number | null;
   /** How many players have solved this post. */
   solvers: number;
+  /** The username of the player who made this puzzle, or null for a generated one. */
+  maker: string | null;
 };
 
 /** Body of POST /api/submit. */
 export type SubmitRequest = { blocks: string[] };
 
-export const SUBMIT_REJECTIONS = ['logged-out', 'malformed', 'not-solved', 'no-puzzle'] as const;
+export const SUBMIT_REJECTIONS = ['logged-out', 'malformed', 'not-solved', 'no-puzzle', 'own-puzzle'] as const;
 export type SubmitRejection = (typeof SUBMIT_REJECTIONS)[number];
 
 /** Response of POST /api/submit. */
@@ -122,9 +183,26 @@ export type Result = {
   joinPrompt: boolean;
 };
 
-/** Response of GET /api/result. Only a player who has submitted gets the data. */
+/**
+ * What the maker of a puzzle sees of its results: how the players are doing,
+ * with no place of their own, because the maker is never ranked on it.
+ */
+export type MakerResult = {
+  par: number;
+  /** How many players have submitted for this post. */
+  solvers: number;
+  leaderboard: LeaderboardRow[];
+  /** The fewest blocks anyone has submitted so far, or null when nobody has. */
+  record: { blocks: number; underPar: boolean } | null;
+};
+
+/**
+ * Response of GET /api/result. A player who has submitted gets their result;
+ * the puzzle's maker gets the maker's view; nobody else gets anything.
+ */
 export type ResultResponse =
   | { status: 'ok'; result: Result }
+  | { status: 'maker'; result: MakerResult }
   | { status: 'not-submitted'; message: string };
 
 /**
@@ -270,6 +348,14 @@ export const parseSubmission = (value: unknown): Submission | null => {
   return { blocks, par, stars, sculpture: [...sculpture] };
 };
 
+const parseCommunityStatus = (value: unknown): CommunityStatus | null => {
+  if (!isRecord(value)) return null;
+  const { canMake, why, review } = value;
+  if (typeof canMake !== 'boolean' || (why !== null && typeof why !== 'string')) return null;
+  if (review !== null && !isCount(review)) return null;
+  return { canMake, why, review };
+};
+
 const parseOnboarding = (value: unknown): Onboarding | null => {
   if (!isRecord(value)) return null;
   const { warmup, solveHint } = value;
@@ -284,10 +370,68 @@ export const parsePuzzleResponse = (value: unknown): PuzzleResponse | null => {
   if (!puzzle) return null;
   const onboarding = parseOnboarding(value.onboarding);
   if (!onboarding) return null;
-  if (value.submission === null) return { puzzle, canSubmit, submission: null, debug, onboarding };
+  const { post, maker, yours, muted } = value;
+  if (!isCount(post) || (maker !== null && typeof maker !== 'string')) return null;
+  if (typeof yours !== 'boolean' || typeof muted !== 'boolean') return null;
+  const community = parseCommunityStatus(value.community);
+  if (!community) return null;
+  const rest = { puzzle, canSubmit, debug, onboarding, post, maker, yours, community, muted };
+  if (value.submission === null) return { ...rest, submission: null };
   const submission = parseSubmission(value.submission);
-  return submission ? { puzzle, canSubmit, submission, debug, onboarding } : null;
+  return submission ? { ...rest, submission } : null;
 };
+
+const parseSize = (value: unknown): Size | null => {
+  if (!isRecord(value)) return null;
+  const { w, d, h } = value;
+  return isBoardEdge(w) && isBoardEdge(d) && isBoardEdge(h) ? { w, d, h } : null;
+};
+
+export const parseMakePuzzleRequest = (value: unknown): MakePuzzleRequest | null => {
+  if (!isRecord(value) || !isBlockKeys(value.blocks)) return null;
+  const size = parseSize(value.size);
+  if (!size) return null;
+  const { blocks } = value;
+  if (blocks.length > size.w * size.d * size.h || new Set(blocks).size !== blocks.length) return null;
+  return { size, blocks: [...blocks] };
+};
+
+export const parseMakePuzzleResponse = (value: unknown): MakePuzzleResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'sent' && isCount(value.par)) return { status: 'sent', par: value.par };
+  if (value.status === 'refused' && typeof value.reason === 'string' && typeof value.message === 'string') {
+    return { status: 'refused', reason: value.reason, message: value.message };
+  }
+  return null;
+};
+
+const parseReviewPuzzle = (value: unknown): ReviewPuzzle | null => {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.maker !== 'string') return null;
+  // The silhouettes and par are checked exactly as a puzzle's are.
+  const puzzle = parsePuzzle({ ...value, number: 0, tier: 1 });
+  if (!puzzle) return null;
+  return { id: value.id, size: puzzle.size, front: puzzle.front, side: puzzle.side, par: puzzle.par, maker: value.maker };
+};
+
+export const parseReviewRequest = (value: unknown): ReviewRequest | null => {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id === '') return null;
+  const decision = REVIEW_DECISIONS.find((known) => known === value.decision);
+  return decision ? { id: value.id, decision } : null;
+};
+
+export const parseReviewResponse = (value: unknown): ReviewResponse | null => {
+  if (!isRecord(value)) return null;
+  if (value.status === 'refused' && typeof value.message === 'string') {
+    return { status: 'refused', message: value.message };
+  }
+  if (value.status !== 'ok' || !isCount(value.waiting)) return null;
+  if (value.puzzle === null) return { status: 'ok', waiting: value.waiting, puzzle: null };
+  const puzzle = parseReviewPuzzle(value.puzzle);
+  return puzzle ? { status: 'ok', waiting: value.waiting, puzzle } : null;
+};
+
+export const parsePrefsRequest = (value: unknown): PrefsRequest | null =>
+  isRecord(value) && typeof value.muted === 'boolean' ? { muted: value.muted } : null;
 
 export const parseOnboardingRequest = (value: unknown): OnboardingRequest | null => {
   if (!isRecord(value)) return null;
@@ -310,12 +454,14 @@ export const parseSplashResponse = (value: unknown): SplashResponse | null => {
   const puzzle = parsePuzzle({ id: 'splash', number, tier: 1, par: 0, size: value.size, front: value.front, side: value.side });
   if (!puzzle) return null;
   if (!isCount(solvers) || (streak !== null && !isCount(streak))) return null;
+  const { maker } = value;
+  if (maker !== null && typeof maker !== 'string') return null;
   let own: SplashResponse['played'] = null;
   if (played !== null) {
     if (!isRecord(played) || !isCount(played.blocks) || !isCount(played.par) || !isStars(played.stars)) return null;
     own = { blocks: played.blocks, par: played.par, stars: played.stars };
   }
-  return { number, date, size: puzzle.size, front: puzzle.front, side: puzzle.side, played: own, streak, solvers };
+  return { number, date, size: puzzle.size, front: puzzle.front, side: puzzle.side, played: own, streak, solvers, maker };
 };
 
 /**
@@ -393,10 +539,29 @@ const parseResult = (value: unknown): Result | null => {
   };
 };
 
+const parseMakerResult = (value: unknown): MakerResult | null => {
+  if (!isRecord(value)) return null;
+  const { par, solvers, leaderboard, record } = value;
+  if (!isCount(par) || !isCount(solvers) || !Array.isArray(leaderboard)) return null;
+  const rows: LeaderboardRow[] = [];
+  for (const entry of leaderboard) {
+    const row = parseLeaderboardRow(entry);
+    if (!row) return null;
+    rows.push(row);
+  }
+  if (record === null) return { par, solvers, leaderboard: rows, record: null };
+  if (!isRecord(record) || !isCount(record.blocks) || typeof record.underPar !== 'boolean') return null;
+  return { par, solvers, leaderboard: rows, record: { blocks: record.blocks, underPar: record.underPar } };
+};
+
 export const parseResultResponse = (value: unknown): ResultResponse | null => {
   if (!isRecord(value)) return null;
   if (value.status === 'not-submitted' && typeof value.message === 'string') {
     return { status: 'not-submitted', message: value.message };
+  }
+  if (value.status === 'maker') {
+    const result = parseMakerResult(value.result);
+    return result ? { status: 'maker', result } : null;
   }
   if (value.status !== 'ok') return null;
   const result = parseResult(value.result);

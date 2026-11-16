@@ -3,7 +3,7 @@
 // the same painting, smaller), the table top, and the wood on a block's faces.
 // What to paint is decided here; every colour and weight comes from theme.ts.
 
-import type { CellState } from '../shared/logic';
+import { parseSilhouette, type CellState } from '../shared/logic';
 import { fitDashes, insetLoop, loopLength, outlineLoops, type Loop } from './outline';
 import { THEME } from './theme';
 
@@ -490,4 +490,42 @@ export const paintWood = (context: Context, { end, variant, floating }: WoodPain
     context.setLineDash([]);
     context.lineDashOffset = 0;
   }
+};
+
+/** Panels are drawn no finer than this many canvas pixels per CSS pixel. */
+const MAX_PANEL_RATIO = 3;
+
+/**
+ * Paints one silhouette of a puzzle on a small canvas, as a sheet of the same
+ * paper as the walls: the shape wanted, or with `filled` the shape full of
+ * shadow. `rows` are the silhouette as a puzzle stores it, top row first, and
+ * `panelPx` is the longest side of the panel in CSS pixels.
+ */
+export const paintSilhouette = (
+  canvas: HTMLCanvasElement,
+  kind: WallKind,
+  rows: readonly string[],
+  filled: boolean,
+  panelPx: number
+): void => {
+  // Top row first, as the silhouette is written and as the painter wants it.
+  const grid = [...parseSilhouette(rows)].reverse();
+  const columns = grid[0]?.length ?? 0;
+  const context = canvas.getContext('2d');
+  if (columns === 0 || !context) return;
+  const cellPx = Math.floor(panelPx / Math.max(columns, grid.length));
+  const ratio = Math.min(window.devicePixelRatio || 1, MAX_PANEL_RATIO);
+  canvas.width = Math.round(columns * cellPx * ratio);
+  canvas.height = Math.round(grid.length * cellPx * ratio);
+  canvas.style.width = `${columns * cellPx}px`;
+  canvas.style.height = `${grid.length * cellPx}px`;
+  const lit: CellState = filled ? 'match' : 'missing';
+  paintWall(context, {
+    kind,
+    columns,
+    rows: grid.length,
+    cell: cellPx * ratio,
+    states: grid.map((row) => row.map((wanted): CellState => (wanted ? lit : 'empty'))),
+    unit: ratio,
+  });
 };

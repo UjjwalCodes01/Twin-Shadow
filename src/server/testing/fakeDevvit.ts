@@ -14,7 +14,15 @@ export type FakeContext = {
 export type FakePost = { id: string; title: string; postData: Record<string, unknown> | undefined };
 
 /** A comment as the fake Reddit holds it. `authorName` is who Reddit says wrote it. */
-export type FakeComment = { id: string; postId: string; text: string; authorName: string; runAs: 'USER' | 'APP' };
+export type FakeComment = {
+  id: string;
+  postId: string;
+  text: string;
+  authorName: string;
+  runAs: 'USER' | 'APP';
+  /** True once the comment has been distinguished and stuck to the top. */
+  pinned: boolean;
+};
 
 /** The name the fake Reddit gives the app's own account. */
 export const APP_ACCOUNT = 'the-app';
@@ -35,6 +43,7 @@ export const createFakeDevvit = () => {
   let failCommentEdits = false;
   let commentsAsApp = false;
   let failSubscribing = false;
+  let failPinning = false;
 
   const sortedSet = (key: string): Map<string, number> => {
     let found = sortedSets.get(key);
@@ -112,6 +121,14 @@ export const createFakeDevvit = () => {
       }
       return added;
     },
+    zRem: async (key: string, members: string[]): Promise<number> => {
+      let removed = 0;
+      for (const member of members) {
+        if (sortedSet(key).delete(member)) removed += 1;
+      }
+      return removed;
+    },
+    zCard: async (key: string): Promise<number> => sortedSet(key).size,
     // Only `by: 'rank'` is needed: lowest score first, equal scores by member name.
     zRange: async (
       key: string,
@@ -147,7 +164,12 @@ export const createFakeDevvit = () => {
       id: string;
       text: string;
       runAs?: 'USER' | 'APP';
-    }): Promise<{ id: string; authorName: string; edit: (edit: { text: string }) => Promise<void> }> => {
+    }): Promise<{
+      id: string;
+      authorName: string;
+      edit: (edit: { text: string }) => Promise<void>;
+      distinguish: (makeSticky?: boolean) => Promise<void>;
+    }> => {
       if (failComments) throw new Error('Comments are unavailable');
       const runAs = options.runAs ?? 'APP';
       const comment: FakeComment = {
@@ -156,6 +178,7 @@ export const createFakeDevvit = () => {
         text: options.text,
         authorName: runAs === 'USER' && !commentsAsApp ? (context.username ?? 'unknown') : APP_ACCOUNT,
         runAs,
+        pinned: false,
       };
       comments.push(comment);
       return {
@@ -164,6 +187,10 @@ export const createFakeDevvit = () => {
         edit: async (edit: { text: string }): Promise<void> => {
           if (failCommentEdits) throw new Error('Editing is unavailable');
           comment.text = edit.text;
+        },
+        distinguish: async (makeSticky?: boolean): Promise<void> => {
+          if (failPinning) throw new Error('Pinning is unavailable');
+          comment.pinned = makeSticky === true;
         },
       };
     },
@@ -230,6 +257,10 @@ export const createFakeDevvit = () => {
     setCommentsAsApp: (asApp: boolean): void => {
       commentsAsApp = asApp;
     },
+    /** Makes pinning a comment throw, or work again. */
+    setPinningFailing: (failing: boolean): void => {
+      failPinning = failing;
+    },
     /** Makes every subscribeToCurrentSubreddit call throw, or work again. */
     setSubscribingFailing: (failing: boolean): void => {
       failSubscribing = failing;
@@ -264,6 +295,7 @@ export const createFakeDevvit = () => {
       failCommentEdits = false;
       commentsAsApp = false;
       failSubscribing = false;
+      failPinning = false;
       context.postId = undefined;
       context.postData = undefined;
       context.userId = undefined;

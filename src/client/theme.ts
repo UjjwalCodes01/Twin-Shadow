@@ -258,8 +258,12 @@ const MOTION = {
   swapMs: 160,
   /** Shadow arriving on or leaving a wall or panel. */
   shadowMs: 150,
-  /** A block with nothing under it rides up and down very slightly. */
-  bob: { height: 0.028, periodMs: 1700 },
+  /**
+   * A block with nothing under it rides up and down very slightly for
+   * `forMs` after it starts to float, easing to rest over the last `easeMs`.
+   * Then it holds its lifted pose and nothing more is drawn.
+   */
+  bob: { height: 0.028, periodMs: 1700, forMs: 3000, easeMs: 700 },
   /** The moment a sculpture first becomes a valid solve: both shadows deepen, then ease back. */
   solve: { deepen: 1.24, holdMs: 260 },
   /** The floor tile a first-time player is pointed at. */

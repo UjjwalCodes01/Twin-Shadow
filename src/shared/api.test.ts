@@ -108,6 +108,11 @@ describe('parsePuzzleResponse', () => {
     submission: null,
     debug: false,
     onboarding: { warmup: true, solveHint: false },
+    post: 12,
+    maker: null,
+    yours: false,
+    community: { canMake: true, why: null, review: null },
+    muted: false,
     ...changes,
   });
 
@@ -118,7 +123,37 @@ describe('parsePuzzleResponse', () => {
       submission: null,
       debug: false,
       onboarding: { warmup: true, solveHint: false },
+      post: 12,
+      maker: null,
+      yours: false,
+      community: { canMake: true, why: null, review: null },
+      muted: false,
     });
+  });
+
+  it('accepts a community puzzle`s credit, a moderator`s count and a reason for not making one', () => {
+    const parsed = parsePuzzleResponse(
+      response({ maker: 'ann', yours: true, muted: true, community: { canMake: false, why: 'Not yet.', review: 3 } })
+    );
+    expect(parsed?.maker).toBe('ann');
+    expect(parsed?.yours).toBe(true);
+    expect(parsed?.muted).toBe(true);
+    expect(parsed?.community).toEqual({ canMake: false, why: 'Not yet.', review: 3 });
+  });
+
+  it('rejects a missing or wrong credit, count or sound setting', () => {
+    for (const changes of [
+      { post: undefined },
+      { maker: 7 },
+      { yours: 'no' },
+      { muted: undefined },
+      { community: undefined },
+      { community: { canMake: true, why: null } },
+      { community: { canMake: true, why: 3, review: null } },
+      { community: { canMake: true, why: null, review: -1 } },
+    ]) {
+      expect(parsePuzzleResponse(response(changes)), JSON.stringify(changes)).toBeNull();
+    }
   });
 
   it('rejects a missing or half-given onboarding state', () => {
@@ -399,6 +434,7 @@ describe('parseSplashResponse', () => {
     played: null,
     streak: 2,
     solvers: 40,
+    maker: null,
   };
 
   it('accepts a post not yet played, solved, and seen logged out', () => {
@@ -406,6 +442,8 @@ describe('parseSplashResponse', () => {
     const played = { blocks: 7, par: 6, stars: 2 };
     expect(parseSplashResponse({ ...splash, played })).toEqual({ ...splash, played });
     expect(parseSplashResponse({ ...splash, streak: null })).toEqual({ ...splash, streak: null });
+    expect(parseSplashResponse({ ...splash, maker: 'ann' })).toEqual({ ...splash, maker: 'ann' });
+    expect(parseSplashResponse({ ...splash, maker: 7 })).toBeNull();
   });
 
   it('keeps only the fields it knows', () => {

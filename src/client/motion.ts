@@ -51,8 +51,21 @@ export const liftAt = (elapsed: number): { offset: number; opacity: number } => 
 export const fadeAt = (elapsed: number, ms: number): number =>
   ms <= 0 ? 1 : Math.min(Math.max(elapsed / ms, 0), 1);
 
-/** How far a floating block rides above its hover height at time `now`. */
-export const bobOffset = (now: number): number => bob.height * Math.sin((now / bob.periodMs) * Math.PI * 2);
+/** True while a block that started to float at `since` is still bobbing. */
+export const isBobbing = (now: number, since: number): boolean => now - since < bob.forMs;
+
+/**
+ * How far a floating block rides above its hover height at time `now`, having
+ * started to float at `since`. It bobs for a few seconds, easing off towards
+ * the end, and is then exactly at rest.
+ */
+export const bobOffset = (now: number, since: number): number => {
+  const elapsed = now - since;
+  if (elapsed < 0 || elapsed >= bob.forMs) return 0;
+  // Full strength until the last stretch, then fading to nothing.
+  const strength = Math.min(1, (bob.forMs - elapsed) / bob.easeMs);
+  return bob.height * strength * Math.sin((elapsed / bob.periodMs) * Math.PI * 2);
+};
 
 /** How a block that has just appeared or gone is animated. */
 export type MotionStyle = 'drop' | 'fade' | 'none';

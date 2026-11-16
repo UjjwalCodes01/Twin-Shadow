@@ -4,8 +4,7 @@
 
 import { requestExpandedMode } from '@devvit/web/client';
 import { parseSplashResponse, type SplashResponse } from '../shared/api';
-import { parseSilhouette, type CellState } from '../shared/logic';
-import { paintWall, type WallKind } from './paint';
+import { paintSilhouette, type WallKind } from './paint';
 import {
   buttonText,
   CREATOR_CREDIT,
@@ -21,7 +20,6 @@ import { applyTheme, loadFonts } from './theme';
 const SPLASH_URL = '/api/splash';
 /** Longest side of a silhouette panel, in CSS px. */
 const PANEL_PX = 108;
-const MAX_PANEL_RATIO = 3;
 /** Shown when the server says this post has no puzzle: the game's own message. */
 const NO_PUZZLE = 'This post has no puzzle. Open a newer Twin Shadows post.';
 
@@ -41,35 +39,10 @@ button.addEventListener('click', (event) => {
   requestExpandedMode(event, 'game');
 });
 
-/**
- * Paints one silhouette as a small sheet of paper, exactly as the game's
- * walls and panels are painted. Before the puzzle is solved it shows the
- * shape wanted; after, the shape filled with shadow.
- */
+/** Paints one of the day's two shadows on its canvas. */
 const paintPanel = (id: string, kind: WallKind, rows: readonly string[], solved: boolean): void => {
   const canvas = element(id);
-  if (!(canvas instanceof HTMLCanvasElement)) return;
-  // Top row first, as the silhouette is written and as the painter wants it.
-  const grid = [...parseSilhouette(rows)].reverse();
-  const columns = grid[0]?.length ?? 0;
-  if (columns === 0) return;
-  const cellPx = Math.floor(PANEL_PX / Math.max(columns, grid.length));
-  const ratio = Math.min(window.devicePixelRatio || 1, MAX_PANEL_RATIO);
-  canvas.width = Math.round(columns * cellPx * ratio);
-  canvas.height = Math.round(grid.length * cellPx * ratio);
-  canvas.style.width = `${columns * cellPx}px`;
-  canvas.style.height = `${grid.length * cellPx}px`;
-  const context = canvas.getContext('2d');
-  if (!context) return;
-  const lit: CellState = solved ? 'match' : 'missing';
-  paintWall(context, {
-    kind,
-    columns,
-    rows: grid.length,
-    cell: cellPx * ratio,
-    states: grid.map((row) => row.map((wanted): CellState => (wanted ? lit : 'empty'))),
-    unit: ratio,
-  });
+  if (canvas instanceof HTMLCanvasElement) paintSilhouette(canvas, kind, rows, solved, PANEL_PX);
 };
 
 const show = (splash: SplashResponse): void => {

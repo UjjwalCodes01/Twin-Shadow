@@ -22,7 +22,7 @@ import {
 } from '../shared/logic';
 import type { Puzzle } from '../shared/puzzle';
 import { BLOCK_FACES, blockGeometry, createBlockShape, FACE_KINDS, type FaceKind } from './blockGeometry';
-import { bobOffset, createBlockMotion, motionNow, prefersReducedMotion, type MotionStyle } from './motion';
+import { bobOffset, createBlockMotion, isBobbing, motionNow, prefersReducedMotion, type MotionStyle } from './motion';
 import { createCrossFade, paintTable, paintWall, paintWood, type CrossFade, type WallKind } from './paint';
 import { faceContacts, isUntouched, shadeAt } from './shade';
 import type { GameState, Store } from './store';
@@ -56,6 +56,8 @@ type BlockView = {
   contacts: string;
   /** See-through copies of its materials, while the block is fading in or out. */
   fading: THREE.Material[] | null;
+  /** When the block last started to float, by the animation clock. It bobs for a while after. */
+  floatingSince: number;
 };
 /**
  * A wall. `paint` draws it from the state of each of its cells, indexed
@@ -97,10 +99,28 @@ export type SceneHandle = {
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(Math.max(value, min), max);
 
-export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: Store): SceneHandle => {
+export type SceneOptions = {
+  /**
+   * True for a board with no shadows to match, as when a player is making a
+   * puzzle: the walls simply show the shadows the sculpture casts.
+   */
+  free?: boolean;
+};
+
+/** Every lit cell as plain shadow, with nothing wanted and so nothing wrong. */
+const asCast = (lit: readonly (readonly boolean[])[]): CellState[][] =>
+  lit.map((row) => row.map((cell): CellState => (cell ? 'match' : 'empty')));
+
+export const createScene = (
+  canvas: HTMLCanvasElement,
+  puzzle: Puzzle,
+  store: Store,
+  options: SceneOptions = {}
+): SceneHandle => {
   const { w, d, h } = puzzle.size;
   const frontTarget = parseSilhouette(puzzle.front);
   const sideTarget = parseSilhouette(puzzle.side);
+  const free = options.free === true;
   const look = THEME.scene;
   const motionLook = THEME.motion;
   // A device that asks for less motion gets no travel at all, and shorter fades.
@@ -339,6 +359,7 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
 
   /** Works out each block's look and shading from what is on the board. */
   const paintBlocks = (blocks: ReadonlySet<string>): ReadonlySet<string> => {
+    const now = motionNow();
     const floating = new Set(findFloating(blocks));
     const standing = new Set<string>();
     const solidCells = new Set<number>();
@@ -354,6 +375,8 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     for (const [key, view] of blockViews) {
       const state: BlockState = flashing.has(key) ? 'refused' : floating.has(key) ? 'floating' : 'standing';
       if (state !== view.state) {
+        // A block that has just lost its support starts to bob.
+        if (state === 'floating') view.floatingSince = now;
         view.state = state;
         // A block that is fading keeps its see-through materials until the fade is over.
         if (!view.fading) view.body.material = materialsFor(view, state);
@@ -456,6 +479,7 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
         state: null,
         contacts: '',
         fading: null,
+        floatingSince: 0,
       });
       keyByMesh.set(pick, key);
     }
@@ -479,9 +503,11 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
     for (const view of blockViews.values()) {
       const arrival = blockMotion.arriving(view.key, now);
       const hovering = view.state === 'floating';
-      // A hovering block never comes to rest, unless the device asks for less motion.
-      if (hovering && !reduced) moving = true;
-      const hover = hovering ? blockLook.floating.lift + (reduced ? 0 : bobOffset(now)) : 0;
+      // A hovering block bobs for a few seconds, then rests in its lifted pose
+      // and asks for no more frames. Not at all if the device asks for less motion.
+      const bobbing = hovering && !reduced && isBobbing(now, view.floatingSince);
+      if (bobbing) moving = true;
+      const hover = hovering ? blockLook.floating.lift + (bobbing ? bobOffset(now, view.floatingSince) : 0) : 0;
       view.body.position.y = hover + arrival.offset;
       if (!view.fading) continue;
       if (arrival.moving) {
@@ -612,14 +638,15 @@ export const createScene = (canvas: HTMLCanvasElement, puzzle: Puzzle, store: St
   const sync = (state: GameState): void => {
     const now = motionNow();
     const standing = syncBlocks(state, now);
-    shadows = {
-      front: diffShadow(projectFront(state.blocks, puzzle.size), frontTarget),
-      side: diffShadow(projectSide(state.blocks, puzzle.size), sideTarget),
-    };
+    const cast = { front: projectFront(state.blocks, puzzle.size), side: projectSide(state.blocks, puzzle.size) };
+    shadows = free
+      ? { front: asCast(cast.front), side: asCast(cast.side) }
+      : { front: diffShadow(cast.front, frontTarget), side: diffShadow(cast.side, sideTarget) };
 
     // The moment a sculpture first becomes a valid solve: both shadows deepen
-    // briefly. Not for a sculpture found already solved, nor someone else's.
-    const solved = isSolved(state.blocks, puzzle);
+    // briefly. Not for a sculpture found already solved, nor someone else's,
+    // nor on a board with nothing to solve.
+    const solved = !free && isSolved(state.blocks, puzzle);
     if (solved && wasSolved === false && !state.viewing && !reduced) {
       deepUntil = now + motionLook.solve.holdMs;
     }

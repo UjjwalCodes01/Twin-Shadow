@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parsePuzzle, parseQueuedPuzzle } from '../shared/api';
 import { findFloating, isSolved } from '../shared/logic';
 import type { QueuedPuzzle } from '../shared/puzzle';
-import { canonicalKey, countOverhangs, lowerBound, peakRow } from './analysis';
+import { canonicalKey, countOverhangs, lowerBound, peakRow } from '../shared/analysis';
+import { COMMUNITY_BOARDS } from '../shared/community';
 import { PREVIEW_PATH, PUZZLES_PATH, SOLUTIONS_PATH, puzzlesJson, solutionsJson } from './cli';
 import {
   DEFAULT_OPTIONS,
@@ -153,4 +154,14 @@ describe('generateQueue', () => {
     const other = generateQueue({ count: 2, seed: DEFAULT_OPTIONS.seed + 1 });
     expect(other.puzzles.map((generated) => generated.puzzle)).not.toEqual(puzzles.slice(0, 2));
   }, 120_000);
+});
+
+describe('the boards players make puzzles on', () => {
+  it('take their limits from the generated puzzles of the same size', () => {
+    for (const board of COMMUNITY_BOARDS) {
+      const tier = TIER_SETTINGS[board.tier];
+      expect(tier.size).toEqual(board.size);
+      expect([board.minPeakRow, board.minPar, board.maxPar]).toEqual([tier.minPeakRow, tier.minPar, tier.maxPar]);
+    }
+  });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TEST_PUZZLE } from '../shared/puzzle';
-import { bobOffset, createBlockMotion, DROP_MS, dropOffset, fadeAt, liftAt } from './motion';
+import { bobOffset, createBlockMotion, DROP_MS, dropOffset, fadeAt, isBobbing, liftAt } from './motion';
 import { createStore } from './store';
 import { THEME } from './theme';
 
@@ -55,10 +55,34 @@ describe('fadeAt and bobOffset', () => {
   });
 
   it('bobs a very little, up and down', () => {
-    for (let now = 0; now < bob.periodMs * 2; now += 50) expect(Math.abs(bobOffset(now))).toBeLessThanOrEqual(bob.height);
+    const since = 5000;
+    for (let now = since; now < since + bob.forMs; now += 50) {
+      expect(Math.abs(bobOffset(now, since))).toBeLessThanOrEqual(bob.height);
+    }
     expect(bob.height).toBeLessThan(0.05);
-    expect(bobOffset(bob.periodMs / 4)).toBeCloseTo(bob.height);
-    expect(bobOffset(bob.periodMs * 0.75)).toBeCloseTo(-bob.height);
+    expect(bobOffset(since + bob.periodMs / 4, since)).toBeCloseTo(bob.height);
+    expect(bobOffset(since + bob.periodMs * 0.75, since)).toBeCloseTo(-bob.height);
+  });
+
+  it('bobs for about three seconds after it starts to float, then rests', () => {
+    const since = 5000;
+    expect(bob.forMs).toBeGreaterThanOrEqual(2500);
+    expect(bob.forMs).toBeLessThanOrEqual(3500);
+    expect(isBobbing(since, since)).toBe(true);
+    expect(isBobbing(since + bob.forMs - 1, since)).toBe(true);
+    expect(isBobbing(since + bob.forMs, since)).toBe(false);
+    // At rest, exactly, from then on: nothing is left to draw.
+    expect(bobOffset(since + bob.forMs, since)).toBe(0);
+    expect(bobOffset(since + bob.forMs + 60000, since)).toBe(0);
+  });
+
+  it('eases to rest rather than stopping dead', () => {
+    const since = 0;
+    // Close to the end the swing is far smaller than at the start.
+    const late = Math.max(
+      ...Array.from({ length: 20 }, (_, step) => Math.abs(bobOffset(bob.forMs - 200 + step * 10, since)))
+    );
+    expect(late).toBeLessThan(bob.height * 0.35);
   });
 });
 
