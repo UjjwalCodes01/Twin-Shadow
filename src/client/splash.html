@@ -17,7 +17,10 @@
         <p class="splash-description" id="splash-description"></p>
       </header>
 
-      <!-- The puzzle itself: the two shadows wanted, on the same paper as in the game. -->
+      <!-- A few wooden blocks, drawn in code, and under them the puzzle itself:
+           the two shadows wanted, on the same paper as in the game. -->
+      <div class="splash-visual">
+        <canvas class="splash-art" id="splash-art" aria-hidden="true"></canvas>
       <div class="splash-panels" id="splash-panels" hidden>
         <figure class="splash-panel front">
           <figcaption>Front</figcaption>
@@ -27,6 +30,7 @@
           <figcaption>Side</figcaption>
           <canvas id="splash-side" aria-hidden="true"></canvas>
         </figure>
+      </div>
       </div>
 
       <p class="splash-notice" id="splash-notice" role="status" hidden></p>

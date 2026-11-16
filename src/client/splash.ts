@@ -4,7 +4,7 @@
 
 import { requestExpandedMode } from '@devvit/web/client';
 import { parseSplashResponse, type SplashResponse } from '../shared/api';
-import { paintSilhouette, type WallKind } from './paint';
+import { paintCluster, paintSilhouette, type WallKind } from './paint';
 import {
   buttonText,
   CREATOR_CREDIT,
@@ -38,6 +38,24 @@ element('splash-credit').textContent = CREATOR_CREDIT;
 button.addEventListener('click', (event) => {
   requestExpandedMode(event, 'game');
 });
+
+/**
+ * Draws the cluster of blocks at whatever size the stylesheet has given its
+ * canvas. Left out, by the stylesheet, where it would crowd the panels.
+ */
+const paintArt = (): void => {
+  const art = element('splash-art');
+  if (!(art instanceof HTMLCanvasElement)) return;
+  const { width, height } = art.getBoundingClientRect();
+  const context = art.getContext('2d');
+  if (width === 0 || height === 0 || !context) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 3);
+  art.width = Math.round(width * ratio);
+  art.height = Math.round(height * ratio);
+  paintCluster(context, art.width, art.height);
+};
+paintArt();
+window.addEventListener('resize', paintArt);
 
 /** Paints one of the day's two shadows on its canvas. */
 const paintPanel = (id: string, kind: WallKind, rows: readonly string[], solved: boolean): void => {

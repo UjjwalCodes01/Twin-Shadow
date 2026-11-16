@@ -529,3 +529,148 @@ export const paintSilhouette = (
     unit: ratio,
   });
 };
+
+// --- A small cluster of blocks, for the splash --------------------------------------
+// The same wooden blocks as on the board, drawn flat on a canvas so the splash
+// needs no three.js: each block is three faces seen from above and to one side.
+
+/** Where the blocks of the cluster stand: across to the right, across to the left, and up. */
+const CLUSTER: readonly (readonly [number, number, number])[] = [
+  [0, 0, 0],
+  [0, 0, 1],
+  [0, 0, 2],
+  [1, 0, 0],
+  [1, 0, 1],
+  [2, 0, 0],
+  [0, 1, 0],
+  [0, 2, 0],
+  [0, 2, 1],
+];
+
+const mixColor = (a: number, b: number, amount: number): number => {
+  const channel = (shift: number): number =>
+    Math.round(((a >> shift) & 255) * (1 - amount) + ((b >> shift) & 255) * amount);
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+};
+
+type Corner = readonly [number, number];
+
+/** Fills one face of a block and draws its grain: rings on a top face, lines up a side face. */
+const clusterFace = (context: Context, corners: readonly Corner[], color: number, top: boolean, seed: number): void => {
+  const { lines, rings } = THEME.paint.wood;
+  const outline = (): void => {
+    context.beginPath();
+    corners.forEach(([x, y], index) => (index === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
+    context.closePath();
+  };
+  outline();
+  context.fillStyle = hex(color);
+  context.fill();
+
+  context.save();
+  context.clip();
+  const random = scatter(seed);
+  const xs = corners.map(([x]) => x);
+  const ys = corners.map(([, y]) => y);
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const high = Math.min(...ys);
+  const low = Math.max(...ys);
+  const size = right - left;
+  if (top) {
+    // End grain: rings round a heart off to one side.
+    const heartX = left - size * (0.2 + random() * 0.3);
+    const heartY = high + (low - high) * random();
+    context.strokeStyle = rgba(rings.color, rings.alpha);
+    context.lineWidth = Math.max(0.6, size * 0.012);
+    for (let radius = size * 0.3; radius < size * 1.8; radius += size * (0.09 + random() * 0.05)) {
+      context.beginPath();
+      context.ellipse(heartX, heartY, radius, radius * 0.55, 0, 0, Math.PI * 2);
+      context.stroke();
+    }
+  } else {
+    // Long grain: lines running up the face.
+    context.strokeStyle = rgba(lines.color, lines.alpha);
+    for (let line = 0; line < 7; line++) {
+      const x = left + size * (0.06 + random() * 0.9);
+      context.lineWidth = Math.max(0.5, size * (0.008 + random() * 0.012));
+      context.globalAlpha = 0.4 + random() * 0.6;
+      context.beginPath();
+      context.moveTo(x, high - 2);
+      context.lineTo(x + (random() - 0.5) * size * 0.05, low + 2);
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+  context.restore();
+
+  // A thin darker edge, so neighbouring blocks read as separate pieces. The
+  // grain left its own last stroke as the path, so the face is traced again.
+  outline();
+  context.strokeStyle = rgba(mixColor(color, 0x3a291c, 0.45), 0.55);
+  context.lineWidth = Math.max(0.75, size * 0.018);
+  context.lineJoin = 'round';
+  context.stroke();
+};
+
+/**
+ * Paints the cluster to fill a canvas of `width` by `height` canvas pixels,
+ * with a soft shadow under it as if it stood on the table.
+ */
+export const paintCluster = (context: Context, width: number, height: number): void => {
+  const { tones, lampTint } = THEME.scene.blocks;
+  // With one block's edge as 1: half a face's width across, half its height down.
+  const across = Math.sqrt(3) / 2;
+  const down = 0.5;
+  const place = ([i, j, k]: readonly [number, number, number]): Corner => [(i - j) * across, (i + j) * down - k];
+  // How far the cluster reaches, to fit it to the canvas with a margin for the shadow.
+  const xs = CLUSTER.flatMap((block) => [place(block)[0] - across, place(block)[0] + across]);
+  const ys = CLUSTER.flatMap((block) => [place(block)[1] - 1 - down, place(block)[1] + down]);
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  const edge = Math.min((width * 0.94) / spanX, (height * 0.86) / spanY);
+  const originX = width / 2 - ((Math.max(...xs) + Math.min(...xs)) / 2) * edge;
+  const originY = height * 0.46 - ((Math.max(...ys) + Math.min(...ys)) / 2) * edge;
+
+  context.clearRect(0, 0, width, height);
+
+  // The shadow on the table: each block's footprint, blurred together.
+  context.save();
+  context.shadowColor = rgba(THEME.paint.table.shadow.color, 0.3);
+  context.shadowBlur = edge * 0.3;
+  context.shadowOffsetX = OFFSTAGE;
+  context.fillStyle = '#000000';
+  context.beginPath();
+  for (const [i, j] of CLUSTER) {
+    const [x, y] = place([i, j, 0]);
+    const cx = originX + x * edge - OFFSTAGE - edge * 0.12;
+    const cy = originY + y * edge + edge * 0.08;
+    context.moveTo(cx, cy - down * edge);
+    context.lineTo(cx + across * edge, cy);
+    context.lineTo(cx, cy + down * edge);
+    context.lineTo(cx - across * edge, cy);
+    context.closePath();
+  }
+  context.fill('nonzero');
+  context.restore();
+
+  // Back to front, lower before higher, so nearer blocks cover farther ones.
+  const ordered = [...CLUSTER].sort((a, b) => a[0] + a[1] - (b[0] + b[1]) || a[2] - b[2]);
+  ordered.forEach((block, index) => {
+    const [x, y] = place(block);
+    const cx = originX + x * edge;
+    const cy = originY + y * edge;
+    const w = across * edge;
+    const h = down * edge;
+    const tone = tones[(block[0] * 3 + block[1] * 5 + block[2] * 2) % tones.length] ?? 0xdcb27c;
+    const north: Corner = [cx, cy - edge - h];
+    const east: Corner = [cx + w, cy - edge];
+    const south: Corner = [cx, cy - edge + h];
+    const west: Corner = [cx - w, cy - edge];
+    const drop = (corner: Corner): Corner => [corner[0], corner[1] + edge];
+    // The side towards the warm lamp, the side towards the cool one, and the top, lightest.
+    clusterFace(context, [west, south, drop(south), drop(west)], mixColor(mixColor(tone, lampTint.warm, lampTint.amount), 0x3a291c, 0.1), false, index * 3 + 1);
+    clusterFace(context, [south, east, drop(east), drop(south)], mixColor(mixColor(tone, lampTint.cool, lampTint.amount), 0x3a291c, 0.24), false, index * 3 + 2);
+    clusterFace(context, [north, east, south, west], mixColor(tone, 0xffffff, 0.14), true, index * 3 + 3);
+  });
+};

@@ -32,9 +32,12 @@ export const dateText = (date: string): string => {
   return name && year && day ? `${day} ${name} ${year}` : date;
 };
 
-/** "Puzzle #12 · 30 November 2026". */
-export const headingText = ({ number, date }: Pick<SplashResponse, 'number' | 'date'>): string =>
-  `Puzzle #${number} · ${dateText(date)}`;
+/**
+ * "Puzzle #12 · 30 November 2026", or for a puzzle a player made,
+ * "Puzzle #12 by u/maker · 6 December 2026".
+ */
+export const headingText = ({ number, date, maker }: Pick<SplashResponse, 'number' | 'date' | 'maker'>): string =>
+  `Puzzle #${number}${maker === null ? '' : ` by u/${maker}`} · ${dateText(date)}`;
 
 /** The line under the panels for a player who has solved the post: "9 blocks · par 7". */
 export const playedText = ({ blocks, par }: { blocks: number; par: number }): string =>
@@ -42,7 +45,7 @@ export const playedText = ({ blocks, par }: { blocks: number; par: number }): st
 
 /** How many have solved the post. */
 export const solversText = (solvers: number): string => {
-  if (solvers <= 0) return 'Nobody has solved this yet';
+  if (solvers <= 0) return 'Be the first to solve it';
   return solvers === 1 ? '1 player has solved this' : `${solvers} players have solved this`;
 };
 

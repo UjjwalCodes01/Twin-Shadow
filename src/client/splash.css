@@ -71,6 +71,20 @@ body {
   color: var(--ink-soft);
 }
 
+/* The blocks and the shadows they make. On a narrow post this wrapper is no
+   box of its own: the blocks sit small above the name and the panels keep
+   their place in the column. */
+.splash-visual {
+  display: contents;
+}
+
+.splash-art {
+  order: -1;
+  width: 86px;
+  height: 64px;
+  flex: none;
+}
+
 /* The two shadows wanted, side by side, each on its own sheet of paper. */
 .splash-panels {
   display: flex;
@@ -211,9 +225,19 @@ body {
     grid-area: head;
   }
 
-  .splash-panels {
+  /* The blocks, large, standing above the two shadows they cast. */
+  .splash-visual {
     grid-area: panels;
     align-self: center;
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+  }
+
+  .splash-art {
+    order: 0;
+    width: 210px;
+    height: 170px;
   }
 
   .splash-state,
@@ -231,6 +255,13 @@ body {
 
   .splash-credit {
     grid-area: credit;
+  }
+}
+
+/* Not tall enough for everything: the blocks go first, so the panels are never crowded. */
+@media (max-height: 470px) {
+  .splash-art {
+    display: none;
   }
 }
 

@@ -16,7 +16,13 @@ describe('dateText', () => {
 
 describe('headingText', () => {
   it('gives the puzzle number and the post`s date', () => {
-    expect(headingText({ number: 12, date: '2026-11-30' })).toBe('Puzzle #12 · 30 November 2026');
+    expect(headingText({ number: 12, date: '2026-11-30', maker: null })).toBe('Puzzle #12 · 30 November 2026');
+  });
+
+  it('credits the maker of a puzzle a player made, next to the number', () => {
+    expect(headingText({ number: 14, date: '2026-12-06', maker: 'moss-and-brick' })).toBe(
+      'Puzzle #14 by u/moss-and-brick · 6 December 2026'
+    );
   });
 });
 
@@ -29,7 +35,7 @@ describe('playedText', () => {
 
 describe('solversText', () => {
   it('counts the players who have solved the post', () => {
-    expect(solversText(0)).toBe('Nobody has solved this yet');
+    expect(solversText(0)).toBe('Be the first to solve it');
     expect(solversText(1)).toBe('1 player has solved this');
     expect(solversText(340)).toBe('340 players have solved this');
   });

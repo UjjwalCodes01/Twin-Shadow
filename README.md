@@ -22,6 +22,8 @@ This is an early prototype. A new puzzle is posted each day from a generated que
 - The first result card offers **Join** to follow the community for the daily puzzle. Joining or choosing **No thanks** settles it; you are not asked again.
 - The first time you open the game you get a short warm-up on a small puzzle, with hints that appear one at a time. **Skip** leaves it at once, and the **?** button on the board replays it. Nothing in the warm-up is scored.
 - In the feed, each post shows the day's two shadows, how many players have solved it and, once you have, your stars and blocks.
+- Once you have solved a daily puzzle you can make one. **Make a puzzle** (on the result card, or under **?**) gives you an empty board and a short checklist; when every line is ticked you can send it. The game works out how many blocks it takes to solve, a moderator looks at it, and approved puzzles are used on Sundays with your username as the credit. You are not ranked on your own puzzle.
+- The speaker button in the corner of the board turns the sound off.
 - Your streak counts daily puzzles solved in a row, each on the day it was the newest. Solving an older puzzle never changes it. A best streak of 3, 7 or 30 days earns a flair in the community.
 
 ## Development
