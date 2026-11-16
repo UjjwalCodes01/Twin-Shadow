@@ -64,21 +64,33 @@ export const shareResult = async (
   return 'shared';
 };
 
+export type JoinOutcome = 'ok' | 'unavailable' | 'failed';
+
+/** What Reddit says when the app may not act for this player: an app version not yet approved, or no consent. */
+const NOT_PERMITTED = 'permission not granted';
+
 /**
  * Records a player's answer to the "Join the community" prompt. 'join'
- * subscribes the player to this subreddit first. Returns whether the answer
- * was recorded: a failed subscription records nothing, so the prompt stays
- * and the player can try again.
+ * subscribes the player to this subreddit first. A failed subscription
+ * records nothing, so the prompt stays. When Reddit refuses because the app
+ * is not permitted to join for the player, the outcome is 'unavailable':
+ * trying again cannot help, and the game offers the community's page instead.
+ * 'visit' is that offer taken up, and like 'dismiss' it only records the answer.
  */
-export const answerJoinPrompt = async (userId: string, choice: JoinChoice): Promise<boolean> => {
+export const answerJoinPrompt = async (userId: string, choice: JoinChoice): Promise<JoinOutcome> => {
   if (choice === 'join') {
     try {
       await reddit.subscribeToCurrentSubreddit();
     } catch (error) {
+      if (String(error).includes(NOT_PERMITTED)) {
+        console.warn(`Reddit does not let the app subscribe ${userId}: ${error}`);
+        return 'unavailable';
+      }
       console.error(`Could not subscribe ${userId}: ${error}`);
-      return false;
+      return 'failed';
     }
   }
-  await redis.hSet(KEYS.joinPrompt, { [userId]: choice === 'join' ? 'joined' : 'dismissed' });
-  return true;
+  const answer = choice === 'join' ? 'joined' : choice === 'visit' ? 'visited' : 'dismissed';
+  await redis.hSet(KEYS.joinPrompt, { [userId]: answer });
+  return 'ok';
 };

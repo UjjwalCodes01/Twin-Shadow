@@ -43,6 +43,7 @@ export const createFakeDevvit = () => {
   let failCommentEdits = false;
   let commentsAsApp = false;
   let failSubscribing = false;
+  let refuseSubscribing = false;
   let failPinning = false;
 
   const sortedSet = (key: string): Map<string, number> => {
@@ -195,6 +196,8 @@ export const createFakeDevvit = () => {
       };
     },
     subscribeToCurrentSubreddit: async (): Promise<void> => {
+      // Reddit's own words when the app may not act for the player.
+      if (refuseSubscribing) throw new Error('2 UNKNOWN: permission not granted for [SUBSCRIBE_TO_SUBREDDIT]');
       if (failSubscribing) throw new Error('Subscribing is unavailable');
       if (context.username !== undefined) subscribers.add(context.username);
     },
@@ -265,6 +268,10 @@ export const createFakeDevvit = () => {
     setSubscribingFailing: (failing: boolean): void => {
       failSubscribing = failing;
     },
+    /** Makes Reddit refuse to subscribe anyone for lack of permission, as it does for an app version not yet approved. */
+    setSubscribingRefused: (refused: boolean): void => {
+      refuseSubscribing = refused;
+    },
     /** Makes the next submitCustomPost call throw. */
     failNextPost: (): void => {
       failNextPost = true;
@@ -295,6 +302,7 @@ export const createFakeDevvit = () => {
       failCommentEdits = false;
       commentsAsApp = false;
       failSubscribing = false;
+      refuseSubscribing = false;
       failPinning = false;
       context.postId = undefined;
       context.postData = undefined;

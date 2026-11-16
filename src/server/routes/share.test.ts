@@ -279,6 +279,40 @@ describe('POST /api/join', () => {
     expect((await resultFor(target, 'bea')).joinPrompt).toBe(true);
   });
 
+  it('says joining is unavailable when Reddit refuses for lack of permission, and records nothing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const target = await manualPost();
+    await solveAs(target, 'ann');
+    devvit.setSubscribingRefused(true);
+    const refused = await answerAs(target, 'ann', { choice: 'join' });
+    expect(refused.status).toBe(403);
+    expect(refused.parsed).toEqual({ status: 'unavailable', message: "Joining from here isn't allowed yet." });
+    expect(devvit.subscribers()).toEqual([]);
+    expect(devvit.hashContents(KEYS.joinPrompt)).toEqual({});
+    // Logged as what it is, with Reddit's own words, and not as an error to chase.
+    expect(warn.mock.calls.flat().join(' ')).toContain('permission not granted for [SUBSCRIBE_TO_SUBREDDIT]');
+    expect(error).not.toHaveBeenCalled();
+    // The prompt is still there, and still says the same on another try.
+    expect((await resultFor(target, 'ann')).joinPrompt).toBe(true);
+    expect((await answerAs(target, 'ann', { choice: 'join' })).parsed?.status).toBe('unavailable');
+  });
+
+  it('records a player who opens the community`s page instead, and never offers the prompt again', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const target = await manualPost();
+    await solveAs(target, 'ann');
+    devvit.setSubscribingRefused(true);
+    await answerAs(target, 'ann', { choice: 'join' });
+    const visited = await answerAs(target, 'ann', { choice: 'visit' });
+    expect(visited.status).toBe(200);
+    expect(visited.parsed).toEqual({ status: 'ok' });
+    // Nothing was done as the player: they join for themselves on Reddit's own page.
+    expect(devvit.subscribers()).toEqual([]);
+    expect(devvit.hashContents(KEYS.joinPrompt)).toEqual({ t2_ann: 'visited' });
+    expect((await resultFor(target, 'ann')).joinPrompt).toBe(false);
+  });
+
   it('keeps the prompt when subscribing fails, so the player can try again', async () => {
     const target = await manualPost();
     await solveAs(target, 'ann');

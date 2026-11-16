@@ -231,15 +231,26 @@ export type ShareResponse =
   | { status: 'shared' | 'already-shared' }
   | { status: 'not-submitted' | 'failed'; message: string };
 
-export const JOIN_CHOICES = ['join', 'dismiss'] as const;
-/** The player's answer to the "Join the community" prompt. */
+export const JOIN_CHOICES = ['join', 'dismiss', 'visit'] as const;
+/**
+ * The player's answer to the "Join the community" prompt. 'visit' is offered
+ * in place of 'join' when Reddit will not let the app join for them: they
+ * open the community's own page, where they can join for themselves.
+ */
 export type JoinChoice = (typeof JOIN_CHOICES)[number];
 
 /** Body of POST /api/join. */
 export type JoinRequest = { choice: JoinChoice };
 
-/** Response of POST /api/join. `failed` means the answer was not recorded. */
-export type JoinResponse = { status: 'ok' } | { status: 'failed'; message: string };
+/**
+ * Response of POST /api/join. `unavailable` means Reddit does not let this app
+ * join on a player's behalf, so asking again cannot help. `failed` means
+ * something else went wrong. Neither records an answer.
+ */
+export type JoinResponse =
+  | { status: 'ok' }
+  | { status: 'unavailable'; message: string }
+  | { status: 'failed'; message: string };
 
 export const GALLERY_SORTS = ['rarest', 'leanest'] as const;
 /** 'rarest': fewest builders first. 'leanest': fewest blocks first. */
@@ -624,7 +635,9 @@ export const parseJoinRequest = (value: unknown): JoinRequest | null => {
 export const parseJoinResponse = (value: unknown): JoinResponse | null => {
   if (!isRecord(value)) return null;
   if (value.status === 'ok') return { status: 'ok' };
-  if (value.status === 'failed' && typeof value.message === 'string') return { status: 'failed', message: value.message };
+  if ((value.status === 'failed' || value.status === 'unavailable') && typeof value.message === 'string') {
+    return { status: value.status, message: value.message };
+  }
   return null;
 };
 

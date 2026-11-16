@@ -406,9 +406,10 @@ describe('parseShareResponse', () => {
 });
 
 describe('parseJoinRequest and parseJoinResponse', () => {
-  it('accepts the two answers a player can give', () => {
+  it('accepts the answers a player can give: join, no thanks, or open the community`s page', () => {
     expect(parseJoinRequest({ choice: 'join' })).toEqual({ choice: 'join' });
     expect(parseJoinRequest({ choice: 'dismiss', userId: 't2_someone' })).toEqual({ choice: 'dismiss' });
+    expect(parseJoinRequest({ choice: 'visit' })).toEqual({ choice: 'visit' });
   });
 
   it('rejects any other request', () => {
@@ -420,7 +421,9 @@ describe('parseJoinRequest and parseJoinResponse', () => {
   it('reads the server`s reply', () => {
     expect(parseJoinResponse({ status: 'ok' })).toEqual({ status: 'ok' });
     expect(parseJoinResponse({ status: 'failed', message: 'x' })).toEqual({ status: 'failed', message: 'x' });
+    expect(parseJoinResponse({ status: 'unavailable', message: 'y' })).toEqual({ status: 'unavailable', message: 'y' });
     expect(parseJoinResponse({ status: 'failed' })).toBeNull();
+    expect(parseJoinResponse({ status: 'unavailable' })).toBeNull();
     expect(parseJoinResponse(undefined)).toBeNull();
   });
 });

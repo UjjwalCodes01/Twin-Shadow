@@ -4,7 +4,7 @@
 // and waited for by the first tap that wants any of it, so none of it holds
 // back the first draw.
 
-import { canRunAsUser } from '@devvit/web/client';
+import { canRunAsUser, context, navigateTo } from '@devvit/web/client';
 import {
   parseGalleryResponse,
   parseJoinResponse,
@@ -91,9 +91,21 @@ export const shareResult = async (tap: Event): Promise<ActionOutcome> => {
   }
 };
 
-/** Sends the player's answer to the join prompt. Joining acts as the player, so it asks permission first. */
+/**
+ * Sends the player's answer to the join prompt. Joining acts as the player,
+ * so it asks permission first. 'unavailable' means Reddit will not let the
+ * game join for them at all. 'visit' is their answer to that: the community's
+ * own page is opened, where they can join for themselves.
+ */
 export const answerJoin = async (choice: JoinChoice, tap: Event): Promise<ActionOutcome> => {
   if (choice === 'join' && !(await playerAllows(tap))) return 'declined';
+  if (choice === 'visit') {
+    try {
+      navigateTo(`https://www.reddit.com/r/${context.subredditName}/`);
+    } catch (error) {
+      console.error('Could not open the community page:', error);
+    }
+  }
   try {
     const response = await fetch(JOIN_URL, {
       method: 'POST',
@@ -103,6 +115,7 @@ export const answerJoin = async (choice: JoinChoice, tap: Event): Promise<Action
     const body: unknown = await response.json();
     const parsed = parseJoinResponse(body);
     if (!parsed) throw new Error(`Unreadable reply (HTTP ${response.status})`);
+    if (parsed.status === 'unavailable') return 'unavailable';
     if (parsed.status !== 'ok') throw new Error(parsed.message);
     return 'done';
   } catch (error) {

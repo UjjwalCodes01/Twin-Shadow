@@ -3,6 +3,8 @@ import {
   blockText,
   canShare,
   isMakerResult,
+  joinButtonText,
+  joinPromptText,
   makerSolversText,
   ordinal,
   rankText,
@@ -93,6 +95,19 @@ describe('the Share button', () => {
     expect(canShare('failed')).toBe(true);
     expect(canShare('sharing')).toBe(false);
     expect(canShare('shared')).toBe(false);
+  });
+});
+
+describe('the join prompt', () => {
+  it('offers to join, with a Join button', () => {
+    expect(joinPromptText('join')).toBe('Join the community for daily puzzles.');
+    expect(joinButtonText('join')).toBe('Join');
+  });
+
+  it('offers the community`s page instead once Reddit has refused, and does not say "try again"', () => {
+    expect(joinPromptText('visit')).toBe("Can't join from here yet. Open the community to join.");
+    expect(joinButtonText('visit')).toBe('Open');
+    expect(joinPromptText('visit')).not.toMatch(/try again/i);
   });
 });
 

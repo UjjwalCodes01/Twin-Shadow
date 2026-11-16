@@ -87,8 +87,10 @@ export const KEYS = {
   shares: (postId: string): string => `post:${postId}:shares`,
 
   /**
-   * Hash, user id -> 'joined' or 'dismissed': the player's answer to the
-   * "Join the community" prompt. A player with an answer is never asked again.
+   * Hash, user id -> 'joined', 'dismissed' or 'visited': the player's answer
+   * to the "Join the community" prompt. 'visited' is a player sent to the
+   * community's page to join there, when Reddit would not let the app do it.
+   * A player with an answer is never asked again.
    */
   joinPrompt: 'prompts:join',
 

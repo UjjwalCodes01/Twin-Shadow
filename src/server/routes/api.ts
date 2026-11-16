@@ -239,14 +239,20 @@ api.post('/share', async (c) => {
 
 // Records the caller's answer to the "Join the community" prompt, and for
 // 'join' subscribes them to this subreddit. Called only from the player's
-// own tap on one of the prompt's two buttons.
+// own tap on one of the prompt's two buttons. When Reddit will not let the
+// app join for the player, the reply says so, and the game offers the
+// community's own page instead.
 api.post('/join', async (c) => {
   const { userId } = context;
   if (!userId) return c.json<JoinResponse>({ status: 'failed', message: 'Log in to join.' }, 401);
   const body: unknown = await c.req.json().catch(() => null);
   const request = parseJoinRequest(body);
   if (!request) return c.json<JoinResponse>({ status: 'failed', message: 'That answer could not be read.' }, 400);
-  if (!(await answerJoinPrompt(userId, request.choice))) {
+  const outcome = await answerJoinPrompt(userId, request.choice);
+  if (outcome === 'unavailable') {
+    return c.json<JoinResponse>({ status: 'unavailable', message: "Joining from here isn't allowed yet." }, 403);
+  }
+  if (outcome === 'failed') {
     return c.json<JoinResponse>({ status: 'failed', message: "Couldn't join. Try again." }, 502);
   }
   return c.json<JoinResponse>({ status: 'ok' });

@@ -93,14 +93,23 @@ export const isMakerResult = (result: Result | MakerResult): boolean => !('rank'
 
 export const JOIN_PROMPT_TEXT = 'Join the community for daily puzzles.';
 export const JOIN_FAILED_TEXT = "Couldn't join. Try again.";
+/** Said when Reddit will not let the game join for the player: trying again cannot help, so another way is offered. */
+export const JOIN_UNAVAILABLE_TEXT = "Can't join from here yet. Open the community to join.";
+
+/** How the prompt's first button answers: by joining for the player, or by opening the community's page. */
+export type JoinWay = 'join' | 'visit';
+export const joinButtonText = (way: JoinWay): string => (way === 'join' ? 'Join' : 'Open');
+/** What the prompt says before its button is tapped. */
+export const joinPromptText = (way: JoinWay): string => (way === 'join' ? JOIN_PROMPT_TEXT : JOIN_UNAVAILABLE_TEXT);
 
 // --- The card --------------------------------------------------------------------
 
 /**
  * What a tap on Share or Join came to. 'declined' means the player said no
  * when Reddit asked for permission, so nothing was done and nothing failed.
+ * 'unavailable' means Reddit does not let the game do this for anyone yet.
  */
-export type ActionOutcome = 'done' | 'declined' | 'failed';
+export type ActionOutcome = 'done' | 'declined' | 'failed' | 'unavailable';
 
 export type ResultCardOptions = {
   /**
@@ -192,9 +201,12 @@ export const createResultCard = ({ load, openGallery, openMake, share, answerJoi
     shareButton.classList.toggle('ticked', state === 'shared');
   };
 
+  /** Kept while this card lives: once Reddit has said the game may not join for the player, the page is offered. */
+  let joinWay: JoinWay = 'join';
   const setJoinBusy = (busy: boolean, text: string): void => {
     joinYes.disabled = busy;
     joinNo.disabled = busy;
+    joinYes.textContent = joinButtonText(joinWay);
     joinText.textContent = text;
   };
 
@@ -241,7 +253,7 @@ export const createResultCard = ({ load, openGallery, openMake, share, answerJoi
     if (shareState !== 'sharing') setShareState(result.shared ? 'shared' : 'ready');
     shareButton.hidden = false;
     joinBox.hidden = !result.joinPrompt;
-    setJoinBusy(false, JOIN_PROMPT_TEXT);
+    setJoinBusy(false, joinPromptText(joinWay));
 
     list.replaceChildren(...result.leaderboard.map(rowItem));
     if (result.own) {
@@ -313,12 +325,23 @@ export const createResultCard = ({ load, openGallery, openMake, share, answerJoi
   };
 
   const onJoin = async (tap: Event): Promise<void> => {
+    if (joinWay === 'visit') {
+      // The community's own page opens, and the prompt has had its answer.
+      joinBox.hidden = true;
+      void answerJoin('visit', tap);
+      return;
+    }
     setJoinBusy(true, 'Joining\u2026');
     const outcome = await answerJoin('join', tap);
     if (listeners.signal.aborted) return;
     // Joined: the prompt has done its job and never comes back.
-    if (outcome === 'done') joinBox.hidden = true;
-    else setJoinBusy(false, outcome === 'failed' ? JOIN_FAILED_TEXT : JOIN_PROMPT_TEXT);
+    if (outcome === 'done') {
+      joinBox.hidden = true;
+      return;
+    }
+    // Reddit will not let the game join for them: asking again cannot help, so the button opens the page instead.
+    if (outcome === 'unavailable') joinWay = 'visit';
+    setJoinBusy(false, outcome === 'failed' ? JOIN_FAILED_TEXT : joinPromptText(joinWay));
   };
 
   const onDismiss = (tap: Event): void => {
